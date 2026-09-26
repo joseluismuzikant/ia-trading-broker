@@ -43,54 +43,145 @@ The application will read a user's portfolio and market data, create weekly BUY,
 8. Follow order status and fills.
 9. Review all activity in the personal trading-history page.
 
+## Technology stack
+
+| Area | Technology | Purpose |
+|---|---|---|
+| Language | Python 3.12 | Application and trading logic |
+| Web application | FastAPI | HTML pages, API routes, authentication, and health checks |
+| Frontend | Jinja2 templates, HTML, CSS, and small JavaScript | Server-rendered MVP interface |
+| Agent workflow | LangGraph | Short workflow that creates a trading proposal |
+| AI observability | LangSmith | Redacted model and workflow traces |
+| Database | PostgreSQL | Users, sessions, portfolios, proposals, approvals, orders, and history |
+| ORM and migrations | SQLAlchemy 2 and Alembic | Database access and controlled schema changes |
+| Validation/configuration | Pydantic and Pydantic Settings | Typed data models and environment configuration |
+| HTTP client | `httpx` | Asynchronous IOL and webhook requests |
+| Authentication | Argon2id and server-side sessions | Password hashing and secure application login |
+| Testing | `pytest` | Unit, integration, security, workflow, and browser-flow tests |
+| Packaging/deployment | Docker and Docker Compose | Repeatable local and OCI environments |
+| HTTPS proxy | Caddy or Nginx | TLS termination and secure routing |
+| Hosting | Oracle Cloud Infrastructure | Single-node MVP deployment |
+| Broker integration | IOL REST API | Account, portfolio, market data, and order operations |
+
+React is not required for the first week. The application keeps its web/API boundary clear so a React frontend can be added later without changing strategy, risk, approval, or execution services.
+
 ## Architecture
 
-The MVP uses one repository, one FastAPI application, and one PostgreSQL database.
+The MVP uses one repository, one FastAPI process, and one PostgreSQL database.
 
-```text
-Browser
-   -> HTTPS proxy
-   -> FastAPI
-      |-- server-rendered web pages
-      |-- REST endpoints
-      |-- short LangGraph analysis flow
-      |-- paper/live order executor
-      |-- order reconciler
-      -> PostgreSQL
-      -> IOL API
-      -> LLM provider / LangSmith
-      -> webhook notifications
+### System context
+
+```mermaid README.md
+flowchart LR
+    U[User browser] -->|HTTPS| P[Caddy or Nginx]
+    P --> A[FastAPI application]
+
+    subgraph APP[Application modules]
+        WEB[Pages and API]
+        AUTH[Login and sessions]
+        GRAPH[LangGraph analysis]
+        EXEC[Order execution]
+        RECON[Order reconciliation]
+        HISTORY[Trading history]
+    end
+
+    A --> WEB
+    A --> AUTH
+    A --> GRAPH
+    A --> EXEC
+    A --> RECON
+    A --> HISTORY
+
+    WEB --> DB[(PostgreSQL)]
+    AUTH --> DB
+    GRAPH --> DB
+    EXEC --> DB
+    RECON --> DB
+    HISTORY --> DB
+
+    GRAPH --> IOL[IOL REST API]
+    EXEC --> IOL
+    RECON --> IOL
+    GRAPH --> LLM[LLM provider]
+    GRAPH -. redacted traces .-> LS[LangSmith]
+    A --> WH[Webhook notifications]
 ```
 
-LangGraph is used only to create a proposal:
+### Analysis and approval flow
 
-```text
-load run
-  -> load portfolio and market data
-  -> calculate features
-  -> create recommendations
-  -> validate recommendations
-  -> calculate proposed orders
-  -> check risk
-  -> save proposal
+LangGraph ends after saving the proposal. Human approval and order execution are normal application services, not a graph that waits for days.
+
+```mermaid README.md
+flowchart TD
+    START([Start weekly run]) --> PORT[Load portfolio snapshot]
+    PORT --> MARKET[Load market data]
+    MARKET --> FEATURES[Calculate indicators]
+    FEATURES --> STRATEGY[Create recommendations]
+    STRATEGY --> VALIDATE[Validate recommendation format]
+    VALIDATE --> SIZE[Calculate proposed quantities]
+    SIZE --> RISK[Run fixed risk checks]
+    RISK --> SAVE[Save immutable proposal]
+    SAVE --> REVIEW[User reviews proposal]
+    REVIEW -->|Reject| REJECTED[Record rejection]
+    REVIEW -->|Approve| RECHECK[Check current prices, cash, and positions]
+    RECHECK -->|Material change| NEW[Create a new proposal for review]
+    RECHECK -->|Still valid| EXECUTE[Paper or live executor]
+    EXECUTE --> RECONCILE[Independent order reconciler]
+    RECONCILE --> HISTORY[Update personal trading history]
 ```
 
-Human approval, order submission, cancellation, and reconciliation are separate application services. They do not wait inside a long-running LangGraph workflow.
+### Main application boundaries
 
-## Planned technology
+```mermaid README.md
+flowchart LR
+    UI[Web pages and API] --> ANALYSIS[Analysis service]
+    UI --> APPROVAL[Approval service]
+    UI --> QUERY[Portfolio and history queries]
 
-- Python 3.12
-- FastAPI
-- Server-rendered HTML templates and simple CSS
-- LangGraph and LangSmith
-- PostgreSQL
-- SQLAlchemy 2 and Alembic
-- Pydantic Settings
-- `httpx`
-- `pytest`
-- Docker Compose
-- Caddy or Nginx for HTTPS
-- Oracle Cloud Infrastructure for deployment
+    ANALYSIS --> STRATEGY[Strategy]
+    STRATEGY --> SIZING[Deterministic sizing]
+    SIZING --> RISK[Deterministic risk]
+    RISK --> PROPOSAL[Proposal repository]
+
+    APPROVAL --> EXECUTION[Execution service]
+    EXECUTION --> OE[OrderExecutor port]
+    QUERY --> PS[PortfolioSource port]
+    ANALYSIS --> MD[MarketDataProvider port]
+
+    IOL[IOL adapter] -. implements .-> OE
+    IOL -. implements .-> PS
+    IOL -. implements .-> MD
+    SIM[Paper-trading adapter] -. implements .-> OE
+    SIM -. implements .-> PS
+```
+
+### OCI deployment
+
+```mermaid README.md
+flowchart TB
+    INTERNET[Internet] -->|HTTPS 443| PROXY
+
+    subgraph OCI[Oracle Cloud VM]
+        PROXY[Caddy or Nginx container]
+        API[FastAPI container - one worker]
+        DB[(PostgreSQL container)]
+        VOL[(Persistent block volume)]
+
+        PROXY --> API
+        API --> DB
+        DB --> VOL
+    end
+
+    API -->|HTTPS| IOL[IOL API]
+    API -->|HTTPS| AI[LLM and LangSmith]
+    API -->|HTTPS| WEBHOOK[Notification webhook]
+
+    ADMIN[Restricted administrator] -->|SSH| OCI
+```
+
+### Important boundary
+
+The AI produces recommendations only. It never receives IOL credentials and never submits an order. Deterministic services calculate quantities, apply risk rules, verify approval, and call the selected order executor.
 
 ## Frontend pages
 
@@ -141,7 +232,7 @@ The repository currently contains architecture and implementation plans under `d
 
 Planned structure:
 
-```text
+```text README.md
 app/
   api/
   domain/
