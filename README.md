@@ -112,7 +112,6 @@ The application reads a user's account and market data, decides whether to buy, 
 | Docker Compose | Tool used to start the application, database, and web proxy together. |
 | FastAPI | The Python framework used for pages, API routes, and webhooks. |
 | PostgreSQL | The database that stores users, portfolios, proposals, orders, and history. |
-| Alembic | The tool that applies controlled database changes. |
 | API | A programming interface used by the application or browser to request data or actions. |
 | REST API | The HTTP API style used by IOL. |
 | HTTPS | Encrypted web traffic. |
@@ -150,7 +149,7 @@ The application reads a user's account and market data, decides whether to buy, 
 | External signals | TradingView and Pine Script webhooks | Optional authenticated alerts persisted before graph processing |
 | AI observability | LangSmith | Redacted model and workflow traces |
 | Database | PostgreSQL | Users, sessions, portfolios, proposals, approvals, orders, and history |
-| ORM and migrations | SQLAlchemy 2 and Alembic | Database access and controlled schema changes |
+| ORM | SQLAlchemy 2 | Database access and initial table creation |
 | Validation/configuration | Pydantic and Pydantic Settings | Typed data models and environment configuration |
 | HTTP client | `httpx` | Asynchronous IOL and webhook requests |
 | Authentication | Argon2id and server-side sessions | Password hashing and secure application login |
@@ -388,7 +387,7 @@ The first version does not include IBKR. A future broker should use the same por
 
 ## Repository status
 
-This README is the current implementation plan. Older notes under `docs/` are history and should not be used to build the application. Application code, Docker files, database migrations, and startup commands do not exist yet.
+This README is the implementation plan. Day 1 (FastAPI, login, PostgreSQL, Docker Compose, and health checks) is implemented. See [day1/README.md](day1/README.md) for setup and startup instructions. Later trading features are still planned; there is no live trading.
 
 Planned structure:
 
@@ -409,7 +408,6 @@ app/
 templates/
 static/
 tests/
-alembic/
 docs/
 docker-compose.yml
 ```
@@ -552,7 +550,7 @@ Each day should finish with something that can be opened or tested. Do not start
 
 - Deploy the web proxy, one application process, and PostgreSQL with Docker Compose.
 - Open only HTTPS and restricted SSH. Keep PostgreSQL private.
-- Apply database migrations, configure encrypted backups, and restore one backup into a test database.
+- Verify database schema creation, configure encrypted backups, and restore one backup into a test database.
 - Run the paper browser flow on OCI using real read-only IOL data.
 
 **Done when:** the deployed paper workflow survives an application restart and its logs contain no secrets.
@@ -575,20 +573,9 @@ Each day should finish with something that can be opened or tested. Do not start
 
 ## Running the project
 
-There are no working setup or startup commands yet because the application has not been created. After the first project files exist, this section should explain:
+See [day1/README.md](day1/README.md) for the Day 1 startup guide (Docker Compose, local Python setup, admin creation, health checks, and tests). Database tables are created automatically when the app or CLI starts; no migration tool is used. Schema changes after Day 1 will require an explicit upgrade plan.
 
-- Local prerequisites.
-- Environment variables.
-- Database migrations.
-- Admin-user creation.
-- Docker Compose startup.
-- Test commands.
-- Paper-trading setup.
-- IOL profile, account, portfolio, and transaction refresh.
-- Automatic-trading monitor and safety controls.
-- OCI deployment.
-
-Do not save real passwords or tokens in Git. Future local settings must use an ignored `.env` file based on a committed `.env.example`.
+Never commit real passwords or tokens. Copy `.env.example` to the ignored `.env` file and replace its placeholders.
 
 ## Security
 

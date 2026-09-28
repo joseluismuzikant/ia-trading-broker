@@ -1,0 +1,41 @@
+{% extends "base.html" %}
+{% block title %}Dashboard &middot; ia-trading-broker{% endblock %}
+
+{% block content %}
+<h1>Dashboard</h1>
+<p class="muted">
+  Signed in as <strong>{{ user.username }}</strong>
+  {% if user.is_admin %}<span class="badge">admin</span>{% endif %}
+</p>
+
+<p class="alert alert--info">
+  This dashboard is intentionally empty on Day&nbsp;1. Portfolio, broker
+  connection, and trading pages arrive in the following days.
+</p>
+
+<section class="grid">
+  <article class="card">
+    <h2>Account</h2>
+    <dl class="kv">
+      <dt>User</dt><dd>{{ user.username }}</dd>
+      <dt>Role</dt><dd>{{ "Administrator" if user.is_admin else "User" }}</dd>
+      <dt>Session expires</dt><dd>{{ session_expires_at }}</dd>
+    </dl>
+  </article>
+
+  <article class="card card--muted">
+    <h2>Portfolio</h2>
+    <p class="placeholder">No portfolio yet.</p>
+  </article>
+
+  <article class="card card--muted">
+    <h2>Automatic trading</h2>
+    <p class="placeholder">Disabled. Live trading stays off by default.</p>
+  </article>
+
+  <article class="card card--muted">
+    <h2>Recent activity</h2>
+    <p class="placeholder">Nothing to show.</p>
+  </article>
+</section>
+{% endblock %}

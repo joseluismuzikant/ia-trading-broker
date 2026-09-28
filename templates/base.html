@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>{% block title %}{{ settings().app_name }}{% endblock %}</title>
+  <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+  <header class="site-header">
+    <div class="site-header__inner">
+      <a class="brand" href="/">ia&#8209;trading&#8209;broker</a>
+      {% if user %}
+      <nav class="nav">
+        <a href="/dashboard">Dashboard</a>
+      </nav>
+      <div class="account">
+        <span class="account__user" title="Signed in">{{ user.username }}</span>
+        <form method="post" action="/logout" class="inline-form">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+          <button type="submit" class="button button--ghost">Log out</button>
+        </form>
+      </div>
+      {% endif %}
+    </div>
+  </header>
+
+  <main class="content">
+    {% block content %}{% endblock %}
+  </main>
+
+  <footer class="site-footer">
+    <span>Day 1 foundation &middot; v{{ app_version }}</span>
+    <span>environment: {{ settings().environment }}</span>
+  </footer>
+</body>
+</html>
+
