@@ -10,8 +10,12 @@ The application reads a user's portfolio and market data, decides what to buy, s
 
 - Secure application login for multiple users.
 - One encrypted IOL connection per user.
+- IOL profile, account status, and country portfolio views.
 - Live and paper portfolio views.
+- IOL transaction history and local trading-event history.
+- An automatic-trading monitor showing runs, decisions, orders, health, and safety controls.
 - Weekly portfolio analysis with a rule-based strategy and an optional LLM.
+- Optional Jev analysis and TradingView webhook signals.
 - Clear reasons, evidence, and risk results for every trading decision.
 - Configurable `HUMAN_IN_THE_LOOP` and `AUTOMATIC` approval modes.
 - Order placement from the LangGraph flow after approval or automatic-mode checks.
@@ -23,8 +27,13 @@ The application reads a user's portfolio and market data, decides what to buy, s
 ## Safety rules
 
 - LangGraph can place orders, but only through the typed execution service and IOL adapter.
-- The LLM never receives IOL credentials and cannot build raw broker payloads.
-- Normal Python code calculates quantities and enforces risk rules in both approval modes.
+- IOL credentials never go to Jev, an LLM, TradingView, or another analysis provider.
+- TradingView never calls the order executor or IOL directly.
+- Python calculates EMA, RSI, MACD, ATR, volume features, returns, and portfolio exposure before calling Jev or an LLM.
+- Jev and the LLM cannot calculate final position size, set risk limits, build order payloads, or execute trades.
+- Deterministic Python combines signals through `DecisionPolicy`, calculates quantities, and enforces risk rules in both approval modes.
+- Jev starts in shadow mode: its decisions are recorded but cannot affect execution.
+- Duplicate, stale, invalid, unauthenticated, or unknown-symbol TradingView webhooks are rejected or quarantined safely.
 - In `HUMAN_IN_THE_LOOP` mode, approval is all-or-nothing and expires after 24 hours.
 - In `AUTOMATIC` mode, the flow can continue without a person only after all risk and live-trading checks pass.
 - Changed prices, cash, or positions can stop either mode before submission.
@@ -38,14 +47,15 @@ The application reads a user's portfolio and market data, decides what to buy, s
 
 1. Log in to the application.
 2. Connect and test an IOL account.
-3. View the live or paper portfolio.
-4. Start a weekly analysis.
-5. Review BUY, SELL, and HOLD recommendations.
-6. Choose `HUMAN_IN_THE_LOOP` or `AUTOMATIC` for the strategy.
-7. In human mode, approve or reject the complete proposal. In automatic mode, let the graph continue after risk checks.
-8. Let LangGraph call the paper or IOL execution service.
-9. Follow order status and fills.
-10. Review all activity in the personal trading-history page.
+3. View the IOL profile, account status, and portfolio for the selected country.
+4. Review IOL transactions and the application's full trading history.
+5. Start a weekly analysis or open the automatic-trading monitor.
+6. Review BUY, SELL, and HOLD recommendations.
+7. Choose `HUMAN_IN_THE_LOOP` or `AUTOMATIC` for the strategy.
+8. In human mode, approve or reject the complete proposal. In automatic mode, let the graph continue after risk checks.
+9. Let LangGraph call the paper or IOL execution service.
+10. Follow automatic runs, order status, fills, warnings, and kill-switch state.
+11. Review all activity in the personal trading-history page.
 
 ## Technology stack
 
@@ -54,7 +64,9 @@ The application reads a user's portfolio and market data, decides what to buy, s
 | Language | Python 3.12 | Application and trading logic |
 | Web application | FastAPI | HTML pages, API routes, authentication, and health checks |
 | Frontend | Jinja2 templates, HTML, CSS, and small JavaScript | Server-rendered MVP interface |
-| Agent workflow | LangGraph | Analysis, configurable approval routing, and order-submission orchestration |
+| Agent workflow | LangGraph | Analysis, signal collection, approval routing, and order-submission orchestration |
+| Optional analysis | Jev | Structured BUY/HOLD/SELL, regime, confidence, and probabilities; shadow mode first |
+| External signals | TradingView and Pine Script webhooks | Optional authenticated alerts persisted before graph processing |
 | AI observability | LangSmith | Redacted model and workflow traces |
 | Database | PostgreSQL | Users, sessions, portfolios, proposals, approvals, orders, and history |
 | ORM and migrations | SQLAlchemy 2 and Alembic | Database access and controlled schema changes |
@@ -65,7 +77,7 @@ The application reads a user's portfolio and market data, decides what to buy, s
 | Packaging/deployment | Docker and Docker Compose | Repeatable local and OCI environments |
 | HTTPS proxy | Caddy or Nginx | TLS termination and secure routing |
 | Hosting | Oracle Cloud Infrastructure | Single-node MVP deployment |
-| Broker integration | IOL REST API | Account, portfolio, market data, and order operations |
+| Broker integration | IOL REST API | Profile, account status, country portfolios, transactions, market data, and orders |
 
 React is not required for the first week. The application keeps its web/API boundary clear so a React frontend can be added later without changing strategy, risk, approval, or execution services.
 
@@ -84,6 +96,7 @@ flowchart LR
         WEB[Pages and API]
         AUTH[Login and sessions]
         GRAPH[LangGraph trading flow]
+        SIGNALS[Signal intake and validation]
         EXEC[Typed order execution service]
         RECON[Order reconciliation]
         HISTORY[Trading history]
@@ -92,6 +105,7 @@ flowchart LR
     A --> WEB
     A --> AUTH
     A --> GRAPH
+    A --> SIGNALS
     A --> EXEC
     A --> RECON
     A --> HISTORY
@@ -99,15 +113,20 @@ flowchart LR
     WEB --> DB[(PostgreSQL)]
     AUTH --> DB
     GRAPH --> DB
+    SIGNALS --> DB
     EXEC --> DB
     RECON --> DB
     HISTORY --> DB
 
-    GRAPH --> IOL[IOL REST API]
+    WEB --> IOL[IOL profile, account, portfolio, and transactions]
+    GRAPH --> IOL
     EXEC --> IOL
     RECON --> IOL
-    GRAPH --> LLM[LLM provider]
+    GRAPH --> JEV[Jev - optional and shadow first]
+    GRAPH --> LLM[LLM provider - optional]
     GRAPH -. redacted traces .-> LS[LangSmith]
+    TV[TradingView Pine alerts] -->|authenticated webhook| SIGNALS
+    SIGNALS --> GRAPH
     A --> WH[Webhook notifications]
 ```
 
@@ -118,17 +137,32 @@ The graph supports two independent settings:
 - `approval_mode`: `HUMAN_IN_THE_LOOP` or `AUTOMATIC`.
 - `execution_mode`: `PAPER` or `LIVE`.
 
-In human mode, LangGraph pauses with a durable interrupt and resumes after the user approves. In automatic mode, it follows the automatic branch. Both branches must pass the same deterministic risk and pre-submit checks. The submit node calls the typed execution service; the IOL adapter keeps credentials and broker payloads outside model context.
+In human mode, LangGraph pauses with a durable interrupt and resumes after the user approves. In automatic mode, it follows the automatic branch. Both branches must pass the same deterministic risk and pre-submit checks. The submit node calls the typed execution service; the IOL adapter keeps credentials and broker payloads outside every AI context.
+
+Python first calculates EMA, RSI, MACD, ATR, volume features, returns, and portfolio exposure. The rule-based strategy uses that normalized state. Jev may inspect the same state and return structured BUY/HOLD/SELL, market regime, confidence, and probabilities. Jev starts in shadow mode, so its result is stored for evaluation but does not affect the executable decision. TradingView signals are optional persisted inputs. Later, when Jev is active, disagreement with the rules or low confidence may route to a deeper LLM analysis. A deterministic `DecisionPolicy` creates the final decision before sizing and risk.
 
 ```mermaid README.md
 flowchart TD
-    START([Start scheduled or manual run]) --> PORT[Load portfolio]
-    PORT --> MARKET[Load market data]
-    MARKET --> FEATURES[Calculate indicators]
-    FEATURES --> STRATEGY[Strategy and AI decision]
-    STRATEGY --> VALIDATE[Validate structured output]
-    VALIDATE --> SIZE[Calculate quantities]
-    SIZE --> RISK[Run fixed risk checks]
+    TV[TradingView alert] --> INTAKE[FastAPI webhook validation]
+    INTAKE -->|Valid and fresh| PERSIST[Persist external signal]
+    INTAKE -->|Duplicate, stale, invalid, or unknown symbol| QUARANTINE[Reject or quarantine]
+
+    START([Start scheduled, manual, or signal-aware run]) --> PORT[Load IOL or paper portfolio]
+    PORT --> MARKET[Load IOL market data]
+    MARKET --> FEATURES[Python: EMA, RSI, MACD, ATR, volume, returns, exposure]
+    FEATURES --> RULES[Rule-based strategy]
+    RULES --> COLLECT[Collect optional signals]
+    PERSIST --> COLLECT
+    COLLECT --> JEV[Jev structured analysis]
+    JEV --> SHADOW{Jev shadow mode?}
+    SHADOW -->|Yes| RECORD[Record Jev result only]
+    RECORD --> POLICY[Deterministic DecisionPolicy using rules and valid TradingView signals]
+    SHADOW -->|No| DEEP{Disagreement or low confidence?}
+    DEEP -->|Yes and enabled| LLM[Optional deeper LLM analysis]
+    DEEP -->|No| POLICY
+    LLM --> POLICY
+    POLICY --> SIZE[Deterministic sizing]
+    SIZE --> RISK[Deterministic risk checks]
     RISK -->|Rejected| STOP[Record no trade]
     RISK -->|Passed| SAVE[Save immutable trade plan]
     SAVE --> MODE{Approval mode}
@@ -158,8 +192,12 @@ flowchart LR
     UI --> APPROVAL[Human approval action]
     UI --> QUERY[Portfolio and history queries]
 
-    GRAPH --> STRATEGY[Strategy]
-    STRATEGY --> SIZING[Deterministic sizing]
+    GRAPH --> FEATURES[Python indicators]
+    FEATURES --> STRATEGY[Rule-based strategy]
+    GRAPH --> SIGNALS[Jev and TradingView signals]
+    SIGNALS --> POLICY[Deterministic DecisionPolicy]
+    STRATEGY --> POLICY
+    POLICY --> SIZING[Deterministic sizing]
     SIZING --> RISK[Deterministic risk]
     RISK --> ROUTE[Approval-mode router]
     APPROVAL --> ROUTE
@@ -167,6 +205,8 @@ flowchart LR
     EXECUTION --> OE[OrderExecutor port]
     QUERY --> PS[PortfolioSource port]
     GRAPH --> MD[MarketDataProvider port]
+    TV[TradingView webhook adapter] -. supplies .-> SIGNALS
+    JEV[Jev adapter - shadow first] -. supplies .-> SIGNALS
 
     IOL[IOL adapter] -. implements .-> OE
     IOL -. implements .-> PS
@@ -193,7 +233,8 @@ flowchart TB
     end
 
     API -->|HTTPS| IOL[IOL API]
-    API -->|HTTPS| AI[LLM and LangSmith]
+    API -->|HTTPS| AI[Jev, LLM, and LangSmith]
+    TV[TradingView] -->|HTTPS webhook| PROXY
     API -->|HTTPS| WEBHOOK[Notification webhook]
 
     ADMIN[Restricted administrator] -->|SSH| OCI
@@ -203,38 +244,52 @@ flowchart TB
 
 This is an automated trading system, not only a recommendation system. LangGraph owns the trading workflow and may reach the order-submission node in either configured mode. The graph calls a deterministic execution service, which then calls the IOL adapter.
 
-The LLM can help make the trading decision, but it never receives IOL credentials, raw bearer tokens, or permission to bypass risk rules. Only the IOL adapter creates the provider payload and holds broker authentication.
+Jev and the LLM can help make the trading decision, but neither receives IOL credentials, raw bearer tokens, or permission to bypass `DecisionPolicy`, sizing, or risk. TradingView only supplies signals through a validated webhook. Only the typed execution service can reach the IOL adapter, and only that adapter creates IOL payloads and holds broker authentication.
 
 ## Frontend pages
 
 The first frontend will include:
 
-- Login
-- Dashboard
-- IOL connection setup
-- Live and paper portfolios
-- New weekly analysis
-- Analysis status
-- Strategy settings for human-in-the-loop or automatic mode
-- Proposal review and approval for human mode
-- Automatic-run status and safety controls
-- Trading history with filters
-- Trade and order details
-- Operations view for failed runs and unknown orders
+- **Login** — secure application login.
+- **Dashboard** — account summary, portfolio value, recent transactions, and automatic-trading status.
+- **IOL connection** — save and test encrypted credentials.
+- **My IOL profile** — safe fields from `GET /api/v2/datos-perfil`; never show credentials or tokens.
+- **Account status** — balances and account information from `GET /api/v2/estadocuenta`, with source and refresh time.
+- **Country portfolio** — positions from `GET /api/v2/portafolio/{pais}`, with a validated country selector.
+- **Paper portfolio** — paper cash, positions, value, and fills.
+- **Transaction history** — IOL operations plus local proposals, approvals, orders, fills, cancellations, and failures. Show source, paper/live mode, filters, and detail views.
+- **New weekly analysis** — manual analysis settings.
+- **Analysis status** — current node, progress, result, or safe error.
+- **Strategy settings** — human-in-the-loop or automatic mode, paper/live mode, schedule, limits, and allowlist.
+- **Proposal review** — evidence, decision, quantities, risks, and approval controls for human mode.
+- **Automatic trading monitor** — enabled/disabled state, paper/live state, next and last run, current graph node, last heartbeat, latest decision, active orders, fills, rejected risk checks, stale-data warnings, failures, and reconciliation status.
+- **Automatic trading controls** — pause/resume paper automation, disable automatic execution, and activate the live kill switch. Enabling live automatic trading requires a separate protected action and remains off by default.
+- **Jev evaluation** — shadow-mode results and comparison with the rule-based decision.
+- **TradingView signals** — accepted, duplicate, stale, invalid, and unknown-symbol alerts.
+- **Trade/order detail** — proposal, approval route, broker ID, and all status events.
+- **Operations** — failed runs and unknown orders for authorized users.
+
+Profile, account, portfolio, transaction, and automatic-monitor pages display the latest stored snapshot immediately. A user can request a refresh, which calls IOL through the backend and stores a new timestamped snapshot. A failed refresh must keep the last snapshot visible and mark it stale; it must not erase known data.
 
 A separate React application is not required for the one-week MVP. The backend exposes clear service and API boundaries so React can replace the template frontend later without changing trading logic.
 
 ## Trading history
 
-Each user will have a private, chronological log containing:
+Each user will have a private, chronological view that combines two clearly labeled sources:
+
+- **IOL transaction history:** normalized operations returned by verified IOL order/operation endpoints.
+- **Application trading history:** the append-only local audit log.
+
+The local log contains:
 
 - Analysis started, completed, or failed.
 - Trade plan created, automatically authorized, manually approved, rejected, or expired.
-- Approval mode, execution mode, recommendations, and risk results.
+- Approval mode, execution mode, and rule-based recommendations.
+- Jev shadow/active output, accepted or rejected TradingView signals, optional LLM output, final `DecisionPolicy`, and risk results.
 - Order prepared, submitted, accepted, unknown, filled, rejected, or cancelled.
 - Paper fills and paper-portfolio changes.
 
-History records are append-only during normal operation. Every history query is restricted by `user_id`, and sensitive credentials or raw tokens are never stored in the log.
+History records are append-only during normal operation. Imported IOL transactions are upserted by broker connection and opaque broker operation ID so refreshes do not create duplicates. Every query is restricted by `user_id`, and sensitive credentials, raw tokens, or unsafe provider payloads are never stored in the visible log.
 
 ## Broker boundaries
 
@@ -265,6 +320,8 @@ app/
   ports/
   infrastructure/
     iol/
+    jev/
+    tradingview/
     simulation/
     persistence/
     notifications/
@@ -282,29 +339,33 @@ docker-compose.yml
 - [Original plan](docs/plan.md)
 - [Architecture review](docs/PLAN_REVIEW.md)
 
-The README reflects the latest product direction, including automatic execution. The detailed final plan still needs to be synchronized with this two-mode LangGraph design before implementation starts. The original plan and review are kept to explain earlier architectural decisions.
+The README reflects the latest product direction, including automatic execution, optional Jev analysis, TradingView signals, IOL account views, transaction history, and automatic-trading monitoring. `docs/final_plan.md` includes the account/history/monitor pages, but its older mandatory-approval and shorter LangGraph sections still need to be synchronized with the README's two-mode execution design before implementation starts. The original plan and review are kept to explain earlier architectural decisions.
 
 ## Development roadmap
 
 ### Day 1
 
-Create the application, secure login, basic frontend layout, IOL connection page, and read-only portfolio.
+Create the application, secure login, basic frontend layout, and IOL connection page. Add read-only IOL profile (`/datos-perfil`), account status (`/estadocuenta`), and country portfolio (`/portafolio/{pais}`) adapters and pages with timestamped snapshots.
 
 ### Day 2
 
-Add normalized portfolio and market data, the paper ledger, and portfolio pages.
+Add normalized portfolio and market data, the paper ledger, portfolio pages, and Python indicators: EMA, RSI, MACD, ATR, volume, returns, and exposure.
 
 ### Day 3
 
-Add the rule-based strategy, sizing, risk checks, LangGraph analysis, and proposal pages.
+Add the rule-based strategy, deterministic `DecisionPolicy`, sizing, risk checks, LangGraph flow, and proposal pages. Define the structured signal schema shared by Jev and TradingView.
 
 ### Day 4
 
-Add human-in-the-loop and automatic graph branches, paper execution, reconciliation, notifications, and trading history.
+Add human-in-the-loop and automatic graph branches, paper execution, reconciliation, and notifications. Build the combined IOL transaction/application history and the automatic-trading monitor with run state, heartbeat, decisions, orders, warnings, failures, reconciliation, and protected pause/kill controls. Add the authenticated TradingView webhook with duplicate, freshness, payload, and symbol validation.
 
 ### Day 5
 
-Add the optional LLM, deploy to OCI, complete the browser workflow, and investigate IOL order behavior. Live order submission remains disabled if any behavior is unclear.
+Add Jev in shadow mode and store its structured decisions for evaluation. Add optional deeper LLM routing without allowing Jev, TradingView, or the LLM to bypass `DecisionPolicy`, sizing, or risk. Deploy to OCI, complete the browser workflow, and investigate IOL order behavior. Live order submission remains disabled if any behavior is unclear.
+
+### After the first MVP
+
+Evaluate Jev shadow results against the rule-based strategy and paper outcomes. Only after explicit acceptance may `DecisionPolicy` use Jev as an active input. If Jev and the rules disagree or confidence is low, the graph may request deeper LLM analysis. TradingView remains an input signal and never becomes an execution trigger.
 
 ## Running the project
 
@@ -317,6 +378,8 @@ There are no working installation or startup commands yet because the applicatio
 - Docker Compose startup.
 - Test commands.
 - Paper-trading setup.
+- IOL profile, account, portfolio, and transaction refresh.
+- Automatic-trading monitor and safety controls.
 - OCI deployment.
 
 Do not add real credentials to source control. Future local configuration must use an ignored `.env` file based on a committed `.env.example`.
@@ -329,7 +392,9 @@ Never commit:
 
 - IOL usernames or passwords.
 - IOL bearer tokens.
-- LLM API keys.
+- Unredacted profile, account, portfolio, or transaction API responses.
+- Jev or LLM API keys.
+- TradingView webhook secrets.
 - Session secrets.
 - Credential-encryption keys.
 - Database backups containing user data.
