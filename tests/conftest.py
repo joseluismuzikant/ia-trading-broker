@@ -12,6 +12,11 @@ os.environ.setdefault("SECRET_KEY", "test-secret-key-that-is-long-enough")
 os.environ.setdefault("ENVIRONMENT", "test")
 os.environ.setdefault("COOKIE_SECURE", "false")
 os.environ.setdefault("DATABASE_URL", "sqlite+aiosqlite:///:memory:")
+# A throwaway Fernet key so credentials can be encrypted in tests. It is not
+# used anywhere else.
+os.environ.setdefault(
+    "CREDENTIAL_ENCRYPTION_KEY", "yVzT1uXn2Q0mA5c9rLbPkHoJ8dEgS6wFzR3tIq4vM7s="
+)
 
 from collections.abc import AsyncIterator, Callable
 from typing import Any
@@ -23,9 +28,13 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 from sqlalchemy.pool import StaticPool
 
 from app.db import Base, get_db
+from app.infrastructure.iol.client import IOLClient
+from app.infrastructure.iol.tokens import token_store
 from app.main import app
 from app.models import User
 from app.services import auth as auth_service
+from app.services import broker as broker_service
+from tests.fakes import FakeIOL
 
 TEST_DATABASE_URL = "sqlite+aiosqlite:///:memory:"
 
@@ -111,3 +120,29 @@ async def client(
 def password() -> str:
     """The password used by the default test users."""
     return DEFAULT_PASSWORD
+
+
+@pytest_asyncio.fixture(autouse=True)
+async def _reset_token_store() -> AsyncIterator[None]:
+    """Give every test an empty IOL token cache."""
+    await token_store.clear()
+    yield
+    await token_store.clear()
+
+
+@pytest.fixture
+def fake_iol(monkeypatch: pytest.MonkeyPatch) -> FakeIOL:
+    """Replace the real IOL client with a scripted fake.
+
+    ``app.services.broker.build_client`` is the single seam the application
+    uses to reach the broker, so patching it keeps every test offline.
+    """
+    fake = FakeIOL()
+    monkeypatch.setattr(
+        broker_service,
+        "build_client",
+        lambda: IOLClient(
+            base_url="http://iol.test", timeout=5.0, transport=fake.transport
+        ),
+    )
+    return fake

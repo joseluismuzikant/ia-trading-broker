@@ -11,7 +11,7 @@ from fastapi.staticfiles import StaticFiles
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app import __version__
-from app.api import auth, dashboard, health
+from app.api import auth, broker, connections, dashboard, health
 from app.config import get_settings
 from app.db import dispose_engine, init_db
 from app.errors import CsrfError, RedirectToLogin
@@ -23,7 +23,8 @@ settings = get_settings()
 
 DESCRIPTION = (
     "Automatic trading application for InvertirOnline (IOL). "
-    "Day 1 provides the project foundation, health checks, and login."
+    "Day 1 provides the project foundation, health checks, and login. "
+    "Day 2 adds encrypted IOL connections, profile, and account status."
 )
 
 
@@ -34,6 +35,13 @@ async def lifespan(_app: FastAPI):
     if problems:
         for problem in problems:
             logger.warning("configuration problem: %s", problem)
+
+    if settings.uses_insecure_encryption_key:
+        logger.warning(
+            "CREDENTIAL_ENCRYPTION_KEY is the public development key, so saved "
+            "broker passwords are not really protected. Set a private key in "
+            ".env before saving a real IOL connection."
+        )
 
     logger.info(
         "%s %s starting (environment=%s)",
@@ -62,6 +70,8 @@ def create_app() -> FastAPI:
     app.include_router(health.router)
     app.include_router(auth.router)
     app.include_router(dashboard.router)
+    app.include_router(connections.router)
+    app.include_router(broker.router)
 
     register_exception_handlers(app)
     return app

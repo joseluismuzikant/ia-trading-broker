@@ -1,0 +1,85 @@
+{% extends "base.html" %}
+{% block title %}Account status &middot; ia-trading-broker{% endblock %}
+
+{% block content %}
+<h1>Account status</h1>
+
+{% if not connection %}
+<p class="alert alert--info">
+  No broker connection yet. <a href="/connections/new">Add one</a> to read your
+  account status.
+</p>
+{% else %}
+  {% include "_snapshot_header.html" %}
+
+  {% if account %}
+    <div class="card">
+      <h2>Total</h2>
+      <p class="total">
+        {{ "%.2f" | format(account.total_en_pesos) if account.total_en_pesos is not none else "—" }}
+        <span class="muted">ARS</span>
+      </p>
+    </div>
+
+    {% if account.cuentas %}
+    <table class="table">
+      <thead>
+        <tr>
+          <th>#</th>
+          <th>Type</th>
+          <th>Currency</th>
+          <th class="num">Available</th>
+          <th class="num">Committed</th>
+          <th class="num">Balance</th>
+          <th class="num">Securities</th>
+          <th class="num">Total</th>
+          <th>State</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for item in account.cuentas %}
+        <tr>
+          <td>{{ item.numero or "—" }}</td>
+          <td>{{ item.tipo or "—" }}</td>
+          <td>{{ item.moneda or "—" }}</td>
+          <td class="num">{{ "%.2f" | format(item.disponible) if item.disponible is not none else "—" }}</td>
+          <td class="num">{{ "%.2f" | format(item.comprometido) if item.comprometido is not none else "—" }}</td>
+          <td class="num">{{ "%.2f" | format(item.saldo) if item.saldo is not none else "—" }}</td>
+          <td class="num">{{ "%.2f" | format(item.titulos_valorizados) if item.titulos_valorizados is not none else "—" }}</td>
+          <td class="num">{{ "%.2f" | format(item.total) if item.total is not none else "—" }}</td>
+          <td>{{ item.estado or "—" }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <p class="alert alert--info">The broker returned no accounts.</p>
+    {% endif %}
+
+    {% if account.estadisticas %}
+    <div class="card">
+      <h2>Statistics</h2>
+      <table class="table">
+        <thead>
+          <tr><th>Description</th><th class="num">Quantity</th><th class="num">Volume</th></tr>
+        </thead>
+        <tbody>
+          {% for row in account.estadisticas %}
+          <tr>
+            <td>{{ row.descripcion or "—" }}</td>
+            <td class="num">{{ row.cantidad if row.cantidad is not none else "—" }}</td>
+            <td class="num">{{ row.volumen if row.volumen is not none else "—" }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% endif %}
+  {% elif not snapshot %}
+  <p class="alert alert--info">
+    Nothing saved yet for this connection. Use
+    <strong>Refresh from IOL</strong> to read it now.
+  </p>
+  {% endif %}
+{% endif %}
+{% endblock %}

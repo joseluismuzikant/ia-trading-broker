@@ -387,7 +387,7 @@ The first version does not include IBKR. A future broker should use the same por
 
 ## Repository status
 
-This README is the implementation plan. Day 1 (FastAPI, login, PostgreSQL, Docker Compose, and health checks) is implemented. See [day1/README.md](day1/README.md) for setup and startup instructions. Later trading features are still planned; there is no live trading.
+This README is the implementation plan. Day 1 (FastAPI, login, PostgreSQL, Docker Compose, and health checks) and Day 2 (encrypted IOL connections, profile, and account status) are implemented. See [day1/README.md](day1/README.md) and [day2/README.md](day2/README.md) for setup and startup instructions. Later trading features are still planned; there is no live trading and no order placement.
 
 Planned structure:
 
@@ -573,7 +573,7 @@ Each day should finish with something that can be opened or tested. Do not start
 
 ## Running the project
 
-See [day1/README.md](day1/README.md) for the Day 1 startup guide (Docker Compose, local Python setup, admin creation, health checks, and tests). Database tables are created automatically when the app or CLI starts; no migration tool is used. Schema changes after Day 1 will require an explicit upgrade plan.
+See [day1/README.md](day1/README.md) for the Day 1 startup guide (Docker Compose, local Python setup, admin creation, health checks, and tests), and [day2/README.md](day2/README.md) for the Day 2 guide (credential-encryption key, connecting an IOL account, reading the profile and account status, and one real read). Database tables are created automatically when the app or CLI starts; no migration tool is used. Schema changes after Day 1 will require an explicit upgrade plan.
 
 Never commit real passwords or tokens. Copy `.env.example` to the ignored `.env` file and replace its placeholders.
 

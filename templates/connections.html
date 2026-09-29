@@ -1,0 +1,64 @@
+{% extends "base.html" %}
+{% block title %}Broker connections &middot; ia-trading-broker{% endblock %}
+
+{% block content %}
+<h1>Broker connections</h1>
+<p class="muted">
+  Saved IOL logins. The password is stored encrypted and is never shown again.
+</p>
+
+<p>
+  <a class="button" href="/connections/new">Add a connection</a>
+</p>
+
+{% if connections %}
+<table class="table">
+  <thead>
+    <tr>
+      <th>Label</th>
+      <th>Broker</th>
+      <th>Username</th>
+      <th>Country</th>
+      <th>Last used</th>
+      <th>Last error</th>
+      <th></th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for connection in connections %}
+    <tr>
+      <td><a href="/connections/{{ connection.id }}">{{ connection.label }}</a></td>
+      <td>{{ connection.broker }}</td>
+      <td>{{ connection.username }}</td>
+      <td>{{ connection.country }}</td>
+      <td>
+        {% if connection.last_used_at %}
+          {{ connection.last_used_at.strftime("%Y-%m-%d %H:%M UTC") }}
+        {% else %}
+          <span class="muted">never</span>
+        {% endif %}
+      </td>
+      <td>
+        {% if connection.last_error %}
+          <span class="badge badge--danger">error</span>
+          <span class="muted">{{ connection.last_error }}</span>
+        {% else %}
+          <span class="muted">—</span>
+        {% endif %}
+      </td>
+      <td>
+        <form method="post" action="/connections/{{ connection.id }}/test" class="inline-form">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+          <button type="submit" class="button button--ghost">Test</button>
+        </form>
+      </td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<p class="alert alert--info">
+  No connection yet. Add your IOL login to read your profile and account status.
+</p>
+{% endif %}
+{% endblock %}
