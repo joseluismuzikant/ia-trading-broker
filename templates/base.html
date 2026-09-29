@@ -13,6 +13,9 @@
       {% if user %}
       <nav class="nav">
         <a href="/dashboard">Dashboard</a>
+        <a href="/connections">Connections</a>
+        <a href="/profile">IOL profile</a>
+        <a href="/account-status">Account status</a>
       </nav>
       <div class="account">
         <span class="account__user" title="Signed in">{{ user.username }}</span>
@@ -30,7 +33,7 @@
   </main>
 
   <footer class="site-footer">
-    <span>Day 1 foundation &middot; v{{ app_version }}</span>
+    <span>Day 2 &middot; v{{ app_version }}</span>
     <span>environment: {{ settings().environment }}</span>
   </footer>
 </body>

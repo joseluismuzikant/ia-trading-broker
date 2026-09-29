@@ -145,6 +145,18 @@ h2 {
   letter-spacing: 0.04em;
 }
 
+.badge--ok {
+  background: var(--accent);
+}
+.badge--warn {
+  background: #c9932f;
+  color: #1a1206;
+}
+.badge--danger {
+  background: var(--danger);
+  color: #fff;
+}
+
 /* --- Forms ------------------------------------------------------------- */
 .form {
   display: flex;
@@ -227,6 +239,116 @@ h2 {
 .alert--info {
   background: rgba(47, 111, 155, 0.15);
   border: 1px solid var(--info);
+}
+
+.alert--ok {
+  background: rgba(61, 153, 112, 0.15);
+  border: 1px solid var(--accent);
+}
+
+.alert--warn {
+  background: rgba(201, 147, 47, 0.15);
+  border: 1px solid #c9932f;
+}
+
+/* --- Connection and broker-data pages ---------------------------------- */
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+  margin-bottom: 1rem;
+}
+
+.table th,
+.table td {
+  padding: 0.55rem 0.75rem;
+  text-align: left;
+  border-bottom: 1px solid var(--border);
+  font-size: 0.9rem;
+  vertical-align: top;
+}
+
+.table th {
+  background: var(--surface-muted);
+  color: var(--text-muted);
+  font-weight: 500;
+  font-size: 0.8rem;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.table tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.table .num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.card--tight {
+  padding: 0.85rem 1.25rem;
+}
+
+.toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+
+.toolbar--sub {
+  margin-top: 0.75rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid var(--border);
+  justify-content: flex-start;
+}
+
+.toolbar--sub select {
+  max-width: 320px;
+}
+
+.snapshot-meta {
+  margin: 0.75rem 0 0;
+  font-size: 0.85rem;
+  color: var(--text-muted);
+}
+
+.total {
+  font-size: 1.6rem;
+  font-weight: 600;
+  margin: 0;
+  font-variant-numeric: tabular-nums;
+}
+
+.actions {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+  margin-top: 1.1rem;
+}
+
+.field__hint {
+  font-size: 0.78rem;
+  color: var(--text-muted);
+}
+
+.button--danger {
+  background: var(--danger);
+  color: #fff;
+}
+
+.button--danger:hover {
+  background: #d2604a;
+}
+
+select.field__input {
+  appearance: none;
 }
 
 /* --- Definition lists -------------------------------------------------- */

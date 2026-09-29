@@ -1,0 +1,34 @@
+{% extends "base.html" %}
+{% block title %}IOL profile &middot; ia-trading-broker{% endblock %}
+
+{% block content %}
+<h1>My IOL profile</h1>
+
+{% if not connection %}
+<p class="alert alert--info">
+  No broker connection yet. <a href="/connections/new">Add one</a> to read your
+  IOL profile.
+</p>
+{% else %}
+  {% include "_snapshot_header.html" %}
+
+  {% if profile %}
+  <div class="card">
+    <h2>Profile</h2>
+    <dl class="kv">
+      <dt>Name</dt><dd>{{ profile.full_name }}</dd>
+      <dt>Account number</dt><dd>{{ profile.numero_cuenta or "—" }}</dd>
+      <dt>Investor profile</dt><dd>{{ profile.perfil_inversor or "—" }}</dd>
+      <dt>Sex</dt><dd>{{ profile.sexo or "—" }}</dd>
+      <dt>Document</dt>
+      <dd title="Only the last three digits are shown">{{ profile.masked_dni }}</dd>
+    </dl>
+  </div>
+  {% elif not snapshot %}
+  <p class="alert alert--info">
+    Nothing saved yet for this connection. Use <strong>Refresh from IOL</strong>
+    to read it now.
+  </p>
+  {% endif %}
+{% endif %}
+{% endblock %}

@@ -1,0 +1,73 @@
+{# Shared header for the broker-data pages (profile and account status).
+   Expects: connection, connections, csrf_token, refresh, snapshot, request #}
+<section class="card card--tight">
+  <div class="toolbar">
+    <div>
+      <span class="muted">Connection:</span>
+      <strong>{{ connection.label }}</strong>
+      <span class="muted">({{ connection.username }} &middot; {{ connection.broker }})</span>
+      {% if not connection.is_active %}
+        <span class="badge badge--warn">inactive</span>
+      {% endif %}
+    </div>
+
+    <form method="post" action="{{ request.url.path }}/refresh" class="inline-form">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+      <input type="hidden" name="connection_id" value="{{ connection.id }}" />
+      <button type="submit" class="button">Refresh from IOL</button>
+    </form>
+  </div>
+
+  {% if connections | length > 1 %}
+  <form method="get" action="{{ request.url.path }}" class="toolbar toolbar--sub">
+    <label class="field__label" for="connection_id">Switch connection</label>
+    <select class="field__input" id="connection_id" name="connection_id">
+      {% for item in connections %}
+      <option value="{{ item.id }}" {% if item.id == connection.id %}selected{% endif %}>
+        {{ item.label }} ({{ item.username }})
+      </option>
+      {% endfor %}
+    </select>
+    <button type="submit" class="button button--ghost">Switch</button>
+  </form>
+  {% endif %}
+
+  <p class="snapshot-meta">
+    {% if snapshot %}
+      source: <strong>IOL</strong> &middot;
+      fetched <time>{{ snapshot.fetched_at.strftime("%Y-%m-%d %H:%M:%S UTC") }}</time>
+      {% if snapshot.is_stale %}
+        <span class="badge badge--warn">stale</span>
+      {% else %}
+        <span class="badge badge--ok">current</span>
+      {% endif %}
+    {% else %}
+      <span class="muted">No snapshot saved yet.</span>
+    {% endif %}
+  </p>
+</section>
+
+{% if refresh == "ok" %}
+<p class="alert alert--ok">Refreshed from IOL.</p>
+{% elif refresh == "stale" %}
+<p class="alert alert--error">
+  The refresh failed, so the last saved data is still shown.
+  {% if snapshot and snapshot.error %}<br /><span class="muted">{{ snapshot.error }}</span>{% endif %}
+</p>
+{% elif refresh == "failed" %}
+<p class="alert alert--error">
+  The refresh failed and there is no saved data yet.
+  {% if connection.last_error %}<br /><span class="muted">{{ connection.last_error }}</span>{% endif %}
+</p>
+{% endif %}
+
+{% if snapshot and snapshot.is_stale and refresh != "stale" %}
+<p class="alert alert--warn">
+  This data is stale.
+  {% if snapshot.stale_since %}
+    Last successful read {{ snapshot.fetched_at.strftime("%Y-%m-%d %H:%M UTC") }},
+    marked stale on {{ snapshot.stale_since.strftime("%Y-%m-%d %H:%M UTC") }}.
+  {% endif %}
+  {% if snapshot.error %}<br /><span class="muted">{{ snapshot.error }}</span>{% endif %}
+</p>
+{% endif %}

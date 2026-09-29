@@ -15,6 +15,10 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 #: readiness checks reject it.
 INSECURE_DEFAULT_SECRET = "change-me-insecure-development-secret"
 
+#: Valid but public Fernet key. It keeps local development frictionless and is
+#: rejected by the production readiness check. Replace it everywhere else.
+INSECURE_DEFAULT_ENCRYPTION_KEY = "V19pwAKBBvM85X-KHh3zYNDq0l6LoROtAT8xGZ_2Jyg="
+
 
 class Settings(BaseSettings):
     """Runtime settings for the application."""
@@ -37,12 +41,36 @@ class Settings(BaseSettings):
     session_ttl_hours: int = Field(default=72, ge=1, le=24 * 30)
     cookie_secure: bool = False
 
+    #: Fernet key that protects saved broker credentials. Generate one with:
+    #: python -c "import base64,os; print(base64.urlsafe_b64encode(os.urandom(32)).decode())"
+    credential_encryption_key: SecretStr = Field(
+        default=INSECURE_DEFAULT_ENCRYPTION_KEY, min_length=32
+    )
+
     # --- Database --------------------------------------------------------
     database_url: SecretStr = "postgresql+asyncpg://trading:trading@db:5432/trading"
+
+    # --- IOL broker ------------------------------------------------------
+    iol_base_url: str = "https://api.invertironline.com"
+    iol_request_timeout_seconds: float = Field(default=15.0, gt=0, le=120)
 
     # --- Trading safety switches (both stay off until proven safe) --------
     live_trading_enabled: bool = False
     automatic_live_trading_enabled: bool = False
+
+    @property
+    def uses_insecure_encryption_key(self) -> bool:
+        """True when saved credentials are protected by the public default key.
+
+        This is not a readiness problem: a fresh development checkout must be
+        able to start. It is still a real hazard, because anyone with the
+        repository can decrypt every saved IOL password, so the application
+        warns about it on startup.
+        """
+        return (
+            self.credential_encryption_key.get_secret_value()
+            == INSECURE_DEFAULT_ENCRYPTION_KEY
+        )
 
     @property
     def is_production(self) -> bool:
@@ -59,11 +87,26 @@ class Settings(BaseSettings):
         if len(self.secret_key.get_secret_value()) < 16:
             problems.append("secret_key must be at least 16 characters long")
 
+        if len(self.credential_encryption_key.get_secret_value()) < 32:
+            problems.append(
+                "credential_encryption_key must be a valid Fernet key (44 characters)"
+            )
+
         if self.is_production:
             if self.secret_key.get_secret_value() == INSECURE_DEFAULT_SECRET:
                 problems.append("secret_key must be replaced before production use")
+            if (
+                self.credential_encryption_key.get_secret_value()
+                == INSECURE_DEFAULT_ENCRYPTION_KEY
+            ):
+                problems.append(
+                    "credential_encryption_key must be replaced before production use"
+                )
             if not self.cookie_secure:
                 problems.append("cookie_secure must be True in production")
+
+        if not self.iol_base_url.startswith("https://") and self.is_production:
+            problems.append("iol_base_url must use HTTPS in production")
 
         if self.live_trading_enabled and self.automatic_live_trading_enabled:
             problems.append(

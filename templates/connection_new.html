@@ -1,0 +1,54 @@
+{% extends "base.html" %}
+{% block title %}New connection &middot; ia-trading-broker{% endblock %}
+
+{% block content %}
+<h1>Add an IOL connection</h1>
+
+{% if error %}
+<p class="alert alert--error">{{ error }}</p>
+{% endif %}
+
+<div class="card">
+  <p class="muted">
+    The password is encrypted before it is saved and is never displayed again.
+    Use a read-only IOL user while the trading features are still being built.
+  </p>
+
+  <form method="post" action="/connections" class="form">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+
+    <div class="field">
+      <label class="field__label" for="label">Label</label>
+      <input class="field__input" id="label" name="label" maxlength="80" required
+             value="{{ form.label or '' }}" placeholder="My IOL account" />
+    </div>
+
+    <div class="field">
+      <label class="field__label" for="username">IOL username</label>
+      <input class="field__input" id="username" name="username" maxlength="120" required
+             autocomplete="off" value="{{ form.username or '' }}" />
+    </div>
+
+    <div class="field">
+      <label class="field__label" for="password">IOL password</label>
+      <input class="field__input" id="password" name="password" type="password" required
+             autocomplete="new-password" />
+      <span class="field__hint">Never shown again after saving.</span>
+    </div>
+
+    <div class="field">
+      <label class="field__label" for="country">Country</label>
+      <select class="field__input" id="country" name="country">
+        {% for option in countries %}
+        <option value="{{ option }}" {% if form.country == option %}selected{% endif %}>{{ option }}</option>
+        {% endfor %}
+      </select>
+    </div>
+
+    <div class="actions">
+      <button type="submit" class="button">Save connection</button>
+      <a class="button button--ghost" href="/connections">Cancel</a>
+    </div>
+  </form>
+</div>
+{% endblock %}

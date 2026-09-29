@@ -1,0 +1,88 @@
+{% extends "base.html" %}
+{% block title %}{{ connection.label }} &middot; ia-trading-broker{% endblock %}
+
+{% block content %}
+<h1>{{ connection.label }}</h1>
+
+{% if test_result == "ok" %}
+<p class="alert alert--ok">The broker accepted the saved login.</p>
+{% elif test_result == "failed" %}
+<p class="alert alert--error">
+  The connection test failed.
+  {% if connection.last_error %}{{ connection.last_error }}{% endif %}
+</p>
+{% endif %}
+
+<section class="grid">
+  <article class="card">
+    <h2>Connection</h2>
+    <dl class="kv">
+      <dt>Broker</dt><dd>{{ connection.broker }}</dd>
+      <dt>Username</dt><dd>{{ connection.username }}</dd>
+      <dt>Password</dt><dd class="muted">stored encrypted &middot; never shown</dd>
+      <dt>Country</dt><dd>{{ connection.country }}</dd>
+      <dt>Saved</dt><dd>{{ connection.created_at.strftime("%Y-%m-%d %H:%M UTC") }}</dd>
+      <dt>Last used</dt>
+      <dd>
+        {% if connection.last_used_at %}
+          {{ connection.last_used_at.strftime("%Y-%m-%d %H:%M UTC") }}
+        {% else %}
+          <span class="muted">never</span>
+        {% endif %}
+      </dd>
+      <dt>Last error</dt>
+      <dd>
+        {% if connection.last_error %}
+          {{ connection.last_error }}
+          {% if connection.last_error_at %}
+            <span class="muted">({{ connection.last_error_at.strftime("%Y-%m-%d %H:%M UTC") }})</span>
+          {% endif %}
+        {% else %}
+          <span class="muted">none</span>
+        {% endif %}
+      </dd>
+    </dl>
+
+    <div class="actions">
+      <form method="post" action="/connections/{{ connection.id }}/test" class="inline-form">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+        <button type="submit" class="button">Test connection</button>
+      </form>
+      <form method="post" action="/connections/{{ connection.id }}/delete" class="inline-form">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+        <button type="submit" class="button button--danger">Delete</button>
+      </form>
+    </div>
+  </article>
+
+  <article class="card">
+    <h2>Saved data</h2>
+    <dl class="kv">
+      <dt>Profile</dt>
+      <dd>
+        {% if profile_snapshot %}
+          {{ profile_snapshot.fetched_at.strftime("%Y-%m-%d %H:%M UTC") }}
+          {% if profile_snapshot.is_stale %}<span class="badge badge--warn">stale</span>{% endif %}
+        {% else %}
+          <span class="muted">not fetched</span>
+        {% endif %}
+      </dd>
+      <dt>Account status</dt>
+      <dd>
+        {% if account_snapshot %}
+          {{ account_snapshot.fetched_at.strftime("%Y-%m-%d %H:%M UTC") }}
+          {% if account_snapshot.is_stale %}<span class="badge badge--warn">stale</span>{% endif %}
+        {% else %}
+          <span class="muted">not fetched</span>
+        {% endif %}
+      </dd>
+    </dl>
+    <p class="actions">
+      <a class="button button--ghost" href="/profile?connection_id={{ connection.id }}">Open profile</a>
+      <a class="button button--ghost" href="/account-status?connection_id={{ connection.id }}">Open account status</a>
+    </p>
+  </article>
+</section>
+
+<p><a href="/connections">&larr; All connections</a></p>
+{% endblock %}
