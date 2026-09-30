@@ -40,6 +40,7 @@ The application reads a user's account and market data, decides whether to buy, 
 - Real trading and automatic real trading are off by default and have separate stop switches.
 - A repeated request must not create a second order.
 - If IOL does not clearly confirm an order, the system never sends it again automatically.
+- The application counts its own IOL API calls. Past a configurable monthly limit, reads stop instead of spending money, because IOL bills for calls above its free quota.
 - PostgreSQL is the source of truth for approvals, orders, history, and recovery.
 - Passwords, tokens, and full account snapshots must not appear in logs or LangSmith traces.
 
@@ -383,11 +384,13 @@ IOL-specific details stay inside the IOL adapter. The rest of the application us
 - Broker order IDs
 - Order events
 
+The shared portfolio format lives in `app/domain/portfolio.py`. Instruments, positions, cash, and country portfolios are defined there, independent of any broker. Day 3 maps IOL responses into it inside the adapter, so pages and later strategies never depend on an IOL field name.
+
 The first version does not include IBKR. A future broker should use the same portfolio, market-data, and order interfaces without changing the strategy, risk, or approval logic.
 
 ## Repository status
 
-This README is the implementation plan. Day 1 (FastAPI, login, PostgreSQL, Docker Compose, and health checks) and Day 2 (encrypted IOL connections, profile, and account status) are implemented. See [day1/README.md](day1/README.md) and [day2/README.md](day2/README.md) for setup and startup instructions. Later trading features are still planned; there is no live trading and no order placement.
+This README is the implementation plan. Day 1 (FastAPI, login, PostgreSQL, Docker Compose, and health checks), Day 2 (encrypted IOL connections, profile, and account status), and Day 3 (country portfolio and market-data reads, with IOL call budgeting) are implemented. See [day1/README.md](day1/README.md), [day2/README.md](day2/README.md), and [day3/README.md](day3/README.md) for setup and startup instructions. Later trading features are still planned; there is no live trading and no order placement.
 
 Planned structure:
 
@@ -573,7 +576,7 @@ Each day should finish with something that can be opened or tested. Do not start
 
 ## Running the project
 
-See [day1/README.md](day1/README.md) for the Day 1 startup guide (Docker Compose, local Python setup, admin creation, health checks, and tests), and [day2/README.md](day2/README.md) for the Day 2 guide (credential-encryption key, connecting an IOL account, reading the profile and account status, and one real read). Database tables are created automatically when the app or CLI starts; no migration tool is used. Schema changes after Day 1 will require an explicit upgrade plan.
+See [day1/README.md](day1/README.md) for the Day 1 startup guide (Docker Compose, local Python setup, admin creation, health checks, and tests), [day2/README.md](day2/README.md) for the Day 2 guide (credential-encryption key, connecting an IOL account, reading the profile and account status, and one real read), and [day3/README.md](day3/README.md) for the Day 3 guide (country portfolio, quotes and price history, and the IOL monthly call budget). Database tables are created automatically when the app or CLI starts; no migration tool is used. Schema changes after Day 1 will require an explicit upgrade plan.
 
 Never commit real passwords or tokens. Copy `.env.example` to the ignored `.env` file and replace its placeholders.
 

@@ -14,8 +14,8 @@ from app.models import BrokerConnection
 
 logger = logging.getLogger("ia_trading_broker.connections")
 
-#: Countries IOL exposes a portfolio for. Day 2 only needs the value to be
-#: validated; the country portfolio page arrives on Day 3.
+#: Countries IOL exposes a portfolio for. The value is validated when a
+#: connection is saved and again when a country portfolio is read.
 SUPPORTED_COUNTRIES = ("argentina", "estados_unidos")
 
 MAX_LABEL_LENGTH = 80

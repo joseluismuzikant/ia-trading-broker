@@ -24,7 +24,7 @@ Add a credential-encryption key to `.env`. Generate one and paste it into `CREDE
 python3 -c "import base64, os; print(base64.urlsafe_b64encode(os.urandom(32)).decode())"
 ```
 
-`.env.example` documents the key and the two IOL settings.
+`.env.example` documents the key and the IOL settings.
 
 > **This key is the only way to read saved IOL passwords.** Losing it, or changing it, makes every saved connection unusable; the user has to delete the connection and add it again. Back it up with the same care as the database. Do not commit it.
 
@@ -76,7 +76,6 @@ To work without a real account, run the test suite instead: it answers the same 
 | IOL password | `broker_connections.password_encrypted`, Fernet ciphertext | Until the connection is deleted |
 | IOL bearer token | Process memory only | About 15 minutes, then renewed |
 | Profile and account snapshots | `snapshots.payload`, JSON | Kept; the newest per kind is replaced only by a newer one |
-
 A token is never written to the database, the logs, or a page. A password is decrypted in memory for the duration of one broker call.
 
 ## Tests

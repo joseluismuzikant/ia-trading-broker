@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db import get_db
 from app.deps import AuthContext, require_user, validate_csrf_pair
+from app.infrastructure.iol import call_budget
 from app.services import connections as connections_service
 from app.services import snapshots as snapshots_service
 from app.services.broker import test_connection
@@ -158,6 +159,7 @@ async def connection_detail(
             "profile_snapshot": profile_snapshot,
             "account_snapshot": account_snapshot,
             "test_result": request.query_params.get("test"),
+            "iol_usage": call_budget.usage,
         },
     )
 

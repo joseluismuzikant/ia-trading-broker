@@ -54,6 +54,13 @@ class Settings(BaseSettings):
     iol_base_url: str = "https://api.invertironline.com"
     iol_request_timeout_seconds: float = Field(default=15.0, gt=0, le=120)
 
+    #: IOL bills beyond the free monthly quota, so reads are capped by default.
+    #: A positive value refuses further IOL calls once it is reached; 0 disables
+    #: the cap (and accepts the cost). Every HTTP attempt counts as one call.
+    iol_monthly_call_limit: int = Field(default=25_000, ge=0)
+    #: Fraction of the limit at which a single warning is logged.
+    iol_call_warn_ratio: float = Field(default=0.8, gt=0, le=1)
+
     # --- Trading safety switches (both stay off until proven safe) --------
     live_trading_enabled: bool = False
     automatic_live_trading_enabled: bool = False

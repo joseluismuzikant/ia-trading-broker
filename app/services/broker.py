@@ -1,10 +1,11 @@
 """Orchestration for broker reads.
 
-This module owns the Day 2 rules that involve more than one layer:
+This module owns the rules that involve more than one layer:
 
 * one token per connection, cached in memory;
 * exactly one retry after an authentication error;
-* a snapshot on every success, and a stale flag on every failure.
+* a snapshot on every success, and a stale flag on every failure;
+* a country portfolio stored in the shared, broker-agnostic format.
 
 No function here logs or returns a password or a bearer token.
 """
@@ -15,15 +16,19 @@ import logging
 from dataclasses import dataclass
 from typing import Callable, TypeVar
 
+from pydantic import ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.infrastructure.iol import (
+    AccountStatus,
     IOLAPIError,
     IOLAuthError,
     IOLClient,
     IOLUnavailableError,
     build_client,
+    portfolio_currency,
     safe_message,
+    to_portfolio,
 )
 from app.infrastructure.iol.tokens import CachedToken, token_store
 from app.models import (
@@ -31,6 +36,7 @@ from app.models import (
     SNAPSHOT_PROFILE,
     BrokerConnection,
     Snapshot,
+    portfolio_snapshot_kind,
 )
 from app.services import connections as connections_service
 from app.services import snapshots as snapshots_service
@@ -236,6 +242,79 @@ async def read_account_status(
         user_id=user_id,
         connection=connection,
         kind=SNAPSHOT_ACCOUNT_STATUS,
+        fetch=fetch,
+    )
+
+
+async def _cash_from_account_status(
+    db: AsyncSession,
+    *,
+    user_id: int,
+    connection: BrokerConnection,
+    currency: str | None,
+) -> float | None:
+    """Free cash for one currency, taken from the saved account status.
+
+    The country-portfolio endpoint does not report cash, so it is read from the
+    newest account-status snapshot (Day 2 data) instead of spending a second
+    broker call. Returns None when nothing is saved, the saved payload cannot
+    be read, or no account matches the currency.
+    """
+    snapshot = await snapshots_service.latest_snapshot(
+        db,
+        user_id=user_id,
+        connection_id=connection.id,
+        kind=SNAPSHOT_ACCOUNT_STATUS,
+    )
+    if snapshot is None:
+        return None
+
+    try:
+        status = AccountStatus.model_validate(snapshot.payload)
+    except ValidationError:
+        return None
+
+    total = 0.0
+    matched = False
+    for account in status.cuentas:
+        if currency and account.moneda and account.moneda.lower() != currency.lower():
+            continue
+        if account.disponible is None:
+            continue
+        total += account.disponible
+        matched = True
+
+    return total if matched else None
+
+
+async def read_portfolio(
+    db: AsyncSession,
+    *,
+    user_id: int,
+    connection: BrokerConnection,
+    country: str,
+) -> BrokerReadResult:
+    """Refresh one country portfolio and store it in the shared format."""
+    clean_country = connections_service.validate_country(country)
+
+    async def fetch(client: IOLClient, token: str) -> dict:
+        raw = await client.get_portfolio(token, clean_country)
+        # A cheap indexed read. It may repeat if the token is renewed mid-call,
+        # which is harmless because it only reads.
+        cash = await _cash_from_account_status(
+            db,
+            user_id=user_id,
+            connection=connection,
+            currency=portfolio_currency(raw),
+        )
+        portfolio = to_portfolio(clean_country, raw, cash=cash)
+        return portfolio.model_dump(mode="json")
+
+    return await _read(
+        db,
+        user_id=user_id,
+        connection=connection,
+        kind=portfolio_snapshot_kind(clean_country),
         fetch=fetch,
     )
 

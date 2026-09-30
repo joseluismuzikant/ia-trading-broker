@@ -1,7 +1,8 @@
-"""Typed models for the IOL API responses used on Day 2.
+"""Typed models for the IOL API responses used by the read-only pages.
 
-Each model mirrors the documented response shape and tolerates unknown fields,
-so a broker-side addition never breaks the page.
+Covers the profile and account status (Day 2) and the country portfolio and
+quotes (Day 3). Each model mirrors the documented response shape and tolerates
+unknown fields, so a broker-side addition never breaks a page.
 
 IOL is inconsistent about scalar types: the same field can arrive as a number
 in one account and as a string in another (``numero`` is documented as ``2``
@@ -129,3 +130,61 @@ class AccountStatus(IOLModel):
     cuentas: list[Account] = Field(default_factory=list)
     estadisticas: list[AccountStatistic] = Field(default_factory=list)
     total_en_pesos: float | None = Field(default=None, alias="totalEnPesos")
+
+
+class IOLInstrument(IOLModel):
+    """The ``titulo`` block inside one portfolio asset."""
+
+    simbolo: DisplayStr = None
+    descripcion: DisplayStr = None
+    pais: DisplayStr = None
+    mercado: DisplayStr = None
+    tipo: DisplayStr = None
+    plazo: DisplayStr = None
+    moneda: DisplayStr = None
+
+
+class Parking(IOLModel):
+    """Settlement detail attached to a portfolio asset."""
+
+    disponible_inmediato: float | None = Field(default=None, alias="disponibleInmediato")
+
+
+class PortfolioAsset(IOLModel):
+    """One holding inside ``GET /api/v2/portafolio/{pais}``."""
+
+    cantidad: float | None = None
+    comprometido: float | None = None
+    puntos_variacion: float | None = Field(default=None, alias="puntosVariacion")
+    variacion_diaria: float | None = Field(default=None, alias="variacionDiaria")
+    ultimo_precio: float | None = Field(default=None, alias="ultimoPrecio")
+    ppc: float | None = None
+    ganancia_porcentaje: float | None = Field(default=None, alias="gananciaPorcentaje")
+    ganancia_dinero: float | None = Field(default=None, alias="gananciaDinero")
+    valorizado: float | None = None
+    titulo: IOLInstrument | None = None
+    parking: Parking | None = None
+
+
+class IOLPortfolio(IOLModel):
+    """Response of ``GET /api/v2/portafolio/{pais}``."""
+
+    pais: DisplayStr = None
+    activos: list[PortfolioAsset] = Field(default_factory=list)
+
+
+class Quote(IOLModel):
+    """One quote, from ``Cotizacion`` or one row of ``seriehistorica``."""
+
+    ultimo_precio: float | None = Field(default=None, alias="ultimoPrecio")
+    variacion: float | None = None
+    apertura: float | None = None
+    maximo: float | None = None
+    minimo: float | None = None
+    fecha_hora: DisplayStr = Field(default=None, alias="fechaHora")
+    tendencia: DisplayStr = None
+    cierre_anterior: float | None = Field(default=None, alias="cierreAnterior")
+    monto_operado: float | None = Field(default=None, alias="montoOperado")
+    volumen_nominal: float | None = Field(default=None, alias="volumenNominal")
+    precio_promedio: float | None = Field(default=None, alias="precioPromedio")
+    moneda: DisplayStr = None

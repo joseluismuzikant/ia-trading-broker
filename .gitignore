@@ -9,3 +9,7 @@ htmlcov/
 *.sqlite3
 *.db
 .env
+
+# Editor and IDE state (personal, machine-specific)
+.vscode/
+.idea/

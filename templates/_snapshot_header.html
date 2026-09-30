@@ -1,5 +1,7 @@
-{# Shared header for the broker-data pages (profile and account status).
-   Expects: connection, connections, csrf_token, refresh, snapshot, request #}
+{# Shared header for the broker-data pages (profile, account status, and
+   country portfolio). Expects: connection, connections, csrf_token, refresh,
+   snapshot, request. The portfolio page also passes `country` and `countries`,
+   which switch on the country selector. #}
 <section class="card card--tight">
   <div class="toolbar">
     <div>
@@ -14,12 +16,31 @@
     <form method="post" action="{{ request.url.path }}/refresh" class="inline-form">
       <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
       <input type="hidden" name="connection_id" value="{{ connection.id }}" />
+      {% if country %}
+      <input type="hidden" name="country" value="{{ country }}" />
+      {% endif %}
       <button type="submit" class="button">Refresh from IOL</button>
     </form>
   </div>
 
+  {% if country %}
+  <form method="get" action="{{ request.url.path }}" class="toolbar toolbar--sub">
+    <input type="hidden" name="connection_id" value="{{ connection.id }}" />
+    <label class="field__label" for="country">Country</label>
+    <select class="field__input" id="country" name="country">
+      {% for value in countries %}
+      <option value="{{ value }}" {% if value == country %}selected{% endif %}>
+        {{ value.replace("_", " ") | title }}
+      </option>
+      {% endfor %}
+    </select>
+    <button type="submit" class="button button--ghost">Show</button>
+  </form>
+  {% endif %}
+
   {% if connections | length > 1 %}
   <form method="get" action="{{ request.url.path }}" class="toolbar toolbar--sub">
+    {% if country %}<input type="hidden" name="country" value="{{ country }}" />{% endif %}
     <label class="field__label" for="connection_id">Switch connection</label>
     <select class="field__input" id="connection_id" name="connection_id">
       {% for item in connections %}
@@ -45,6 +66,14 @@
       <span class="muted">No snapshot saved yet.</span>
     {% endif %}
   </p>
+
+  {% if iol_usage %}
+  <p class="snapshot-meta">
+    IOL API calls this month: <strong>{{ iol_usage.used }}</strong>{% if iol_usage.limit %}
+    of {{ iol_usage.limit }}{% endif %}
+    <span class="muted">({{ iol_usage.period }}, counted since this process started)</span>
+  </p>
+  {% endif %}
 </section>
 
 {% if refresh == "ok" %}
