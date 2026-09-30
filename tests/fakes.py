@@ -1,8 +1,8 @@
 """Test doubles for the IOL HTTP API.
 
-``FakeIOL`` is an ``httpx`` transport that answers the Day 2 endpoints from
-saved fixtures. It records what was requested so tests can assert on token
-grants and call counts. It contains no real credentials or account data.
+``FakeIOL`` is an ``httpx`` transport that answers the read endpoints from saved
+fixtures. It records what was requested so tests can assert on token grants and
+call counts. It contains no real credentials or account data.
 """
 
 from __future__ import annotations
@@ -19,6 +19,9 @@ FIXTURE_DIR = Path(__file__).parent / "fixtures" / "iol"
 
 PROFILE_PATH = "/api/v2/datos-perfil"
 ACCOUNT_STATUS_PATH = "/api/v2/estadocuenta"
+PORTFOLIO_PATH_PREFIX = "/api/v2/portafolio/"
+QUOTE_PATH_MARKER = "/Cotizacion"
+HISTORY_PATH_MARKER = "/Cotizacion/seriehistorica/"
 
 
 def load_fixture(name: str) -> Any:
@@ -38,10 +41,27 @@ class FakeIOL:
     account_status: dict = field(
         default_factory=lambda: load_fixture("account_status_ok.json")
     )
+    portfolio: dict = field(default_factory=lambda: load_fixture("portfolio_ok.json"))
+    quote: dict = field(
+        default_factory=lambda: {
+            "ultimoPrecio": 60.555,
+            "variacion": 0.5,
+            "moneda": "Peso_Argentino",
+            "fechaHora": "2024-01-02T15:00:00",
+        }
+    )
+    price_history: list[dict] = field(
+        default_factory=lambda: [
+            {"ultimoPrecio": 60.555, "fechaHora": "2024-01-02T00:00:00"},
+            {"ultimoPrecio": 59.0, "fechaHora": "2023-12-29T00:00:00"},
+        ]
+    )
 
     #: Force an error status for one endpoint instead of returning data.
     profile_error_status: int | None = None
     account_status_error_status: int | None = None
+    portfolio_error_status: int | None = None
+    quote_error_status: int | None = None
 
     #: Reject this many authenticated requests before accepting one, which
     #: simulates a token that expired or was revoked server-side.
@@ -129,5 +149,23 @@ class FakeIOL:
                     self.account_status_error_status, json={"error": "boom"}
                 )
             return httpx.Response(200, json=self.account_status)
+
+        if request.url.path.startswith(PORTFOLIO_PATH_PREFIX):
+            if self.portfolio_error_status:
+                return httpx.Response(
+                    self.portfolio_error_status, json={"error": "boom"}
+                )
+            return httpx.Response(200, json=self.portfolio)
+
+        # The history path also contains the quote marker, so check it first.
+        if HISTORY_PATH_MARKER in request.url.path:
+            if self.quote_error_status:
+                return httpx.Response(self.quote_error_status, json={"error": "boom"})
+            return httpx.Response(200, json=self.price_history)
+
+        if QUOTE_PATH_MARKER in request.url.path:
+            if self.quote_error_status:
+                return httpx.Response(self.quote_error_status, json={"error": "boom"})
+            return httpx.Response(200, json=self.quote)
 
         return httpx.Response(404, json={"error": "not found"})

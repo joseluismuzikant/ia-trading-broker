@@ -76,10 +76,20 @@
           <span class="muted">not fetched</span>
         {% endif %}
       </dd>
+      <dt>IOL API calls</dt>
+      <dd>
+        {% if iol_usage %}
+          {{ iol_usage.used }}{% if iol_usage.limit %} of {{ iol_usage.limit }}{% endif %}
+          <span class="muted">({{ iol_usage.period }})</span>
+        {% else %}
+          <span class="muted">unknown</span>
+        {% endif %}
+      </dd>
     </dl>
     <p class="actions">
       <a class="button button--ghost" href="/profile?connection_id={{ connection.id }}">Open profile</a>
       <a class="button button--ghost" href="/account-status?connection_id={{ connection.id }}">Open account status</a>
+      <a class="button button--ghost" href="/portfolio?connection_id={{ connection.id }}">Open portfolio</a>
     </p>
   </article>
 </section>

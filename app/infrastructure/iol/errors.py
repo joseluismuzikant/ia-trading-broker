@@ -39,10 +39,29 @@ class IOLResponseError(IOLAPIError):
     default_message = "The broker returned an unexpected response."
 
 
+class IOLNotFoundError(IOLAPIError):
+    """The broker does not know the requested instrument or resource."""
+
+    default_message = "The broker does not know that instrument."
+
+
 class IOLUnavailableError(IOLAPIError):
     """The adapter cannot run at all, for example because of bad configuration."""
 
     default_message = "The broker adapter is not available."
+
+
+class IOLBudgetExceededError(IOLAPIError):
+    """The monthly IOL call budget is spent, so no further call was made.
+
+    Raised before the request is sent, so reaching the limit never costs more
+    money. IOL charges for calls past the free monthly quota.
+    """
+
+    default_message = (
+        "The monthly IOL API call limit is reached. No call was made. "
+        "Raise IOL_MONTHLY_CALL_LIMIT to continue."
+    )
 
 
 def safe_message(message: str) -> str:

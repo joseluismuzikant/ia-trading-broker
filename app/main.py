@@ -24,7 +24,8 @@ settings = get_settings()
 DESCRIPTION = (
     "Automatic trading application for InvertirOnline (IOL). "
     "Day 1 provides the project foundation, health checks, and login. "
-    "Day 2 adds encrypted IOL connections, profile, and account status."
+    "Day 2 adds encrypted IOL connections, profile, and account status. "
+    "Day 3 adds the country portfolio and market-data reads."
 )
 
 

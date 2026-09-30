@@ -22,6 +22,14 @@ from app.db import Base
 #: Snapshot kinds. One saved copy is kept per connection and kind.
 SNAPSHOT_PROFILE = "profile"
 SNAPSHOT_ACCOUNT_STATUS = "account_status"
+#: Country portfolios are stored per country. The kind carries the country so
+#: switching country never overwrites another country's saved data.
+SNAPSHOT_PORTFOLIO = "portfolio"
+
+
+def portfolio_snapshot_kind(country: str) -> str:
+    """Return the snapshot kind for one country portfolio."""
+    return f"{SNAPSHOT_PORTFOLIO}:{country}"
 
 
 def utcnow() -> datetime:

@@ -28,6 +28,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 from sqlalchemy.pool import StaticPool
 
 from app.db import Base, get_db
+from app.infrastructure.iol import call_budget
 from app.infrastructure.iol.client import IOLClient
 from app.infrastructure.iol.tokens import token_store
 from app.main import app
@@ -123,11 +124,13 @@ def password() -> str:
 
 
 @pytest_asyncio.fixture(autouse=True)
-async def _reset_token_store() -> AsyncIterator[None]:
-    """Give every test an empty IOL token cache."""
+async def _reset_broker_state() -> AsyncIterator[None]:
+    """Give every test an empty IOL token cache and a fresh call budget."""
     await token_store.clear()
+    call_budget.reset()
     yield
     await token_store.clear()
+    call_budget.reset()
 
 
 @pytest.fixture
