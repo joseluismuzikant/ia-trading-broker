@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
 from typing import Callable, TypeVar
 
 from pydantic import ValidationError
@@ -25,6 +26,7 @@ from app.infrastructure.iol import (
     IOLAuthError,
     IOLClient,
     IOLUnavailableError,
+    Quote,
     build_client,
     portfolio_currency,
     safe_message,
@@ -37,6 +39,7 @@ from app.models import (
     BrokerConnection,
     Snapshot,
     portfolio_snapshot_kind,
+    price_history_kind,
 )
 from app.services import connections as connections_service
 from app.services import snapshots as snapshots_service
@@ -317,6 +320,62 @@ async def read_portfolio(
         kind=portfolio_snapshot_kind(clean_country),
         fetch=fetch,
     )
+
+
+#: Days of price history an analysis reads. Long enough for the slow EMA (26)
+#: plus the MACD signal line (9), with room to spare.
+PRICE_HISTORY_DAYS = 180
+
+
+async def read_price_history(
+    db: AsyncSession,
+    *,
+    user_id: int,
+    connection: BrokerConnection,
+    market: str,
+    symbol: str,
+    days: int = PRICE_HISTORY_DAYS,
+) -> BrokerReadResult:
+    """Refresh one instrument's price history and store it for analysis.
+
+    The history is saved per symbol, so refreshing one instrument never
+    overwrites another's. The payload holds the list of quotes and nothing else.
+    """
+    clean_symbol = symbol.strip().upper()
+    clean_market = market.strip()
+    if not clean_symbol or not clean_market:
+        raise IOLUnavailableError("a market and a symbol are required")
+
+    date_to = datetime.now(UTC).date()
+    date_from = date_to - timedelta(days=days)
+
+    async def fetch(client: IOLClient, token: str) -> dict:
+        quotes = await client.get_price_history(
+            token,
+            market=clean_market,
+            symbol=clean_symbol,
+            date_from=date_from.isoformat(),
+            date_to=date_to.isoformat(),
+        )
+        return {
+            "symbol": clean_symbol,
+            "market": clean_market,
+            "quotes": [quote.model_dump(mode="json", by_alias=True) for quote in quotes],
+        }
+
+    return await _read(
+        db,
+        user_id=user_id,
+        connection=connection,
+        kind=price_history_kind(clean_symbol),
+        fetch=fetch,
+    )
+
+
+def quotes_from_snapshot(snapshot: Snapshot) -> list[Quote]:
+    """Read the quotes out of a saved price-history snapshot."""
+    payload = snapshot.payload.get("quotes", [])
+    return [Quote.model_validate(item) for item in payload]
 
 
 async def load_snapshot(

@@ -74,6 +74,11 @@ async def test_get_quote_parses_the_last_price() -> None:
 
 async def test_get_price_history_returns_a_list() -> None:
     fake = FakeIOL()
+    # A short, explicit series, so the test does not depend on the fake default.
+    fake.price_history = [
+        {"ultimoPrecio": 60.555, "fechaHora": "2023-12-29T00:00:00"},
+        {"ultimoPrecio": 59.0, "fechaHora": "2023-12-28T00:00:00"},
+    ]
 
     async with build_client(fake) as client:
         token = await client.fetch_token(username=USERNAME, password=PASSWORD)
