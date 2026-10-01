@@ -1,656 +1,1661 @@
 # ia-trading-broker
 
-An automatic trading application for InvertirOnline (IOL), built with LangGraph.
+Daily portfolio analysis and human-approved trading for InvertirOnline (IOL), with an OpenAI model as the primary portfolio analyst.
 
-The application reads a user's account and market data, decides whether to buy, sell, or hold, checks fixed risk rules, and can place orders through IOL. Each strategy can use **human approval** or **automatic execution**. The first working version tests both modes with paper trading. Real IOL orders stay off until order handling and recovery are proven.
+The application wraps the IOL API, reads the user's existing portfolio, loads daily market data, calculates technical evidence in Python, asks an OpenAI model what to **BUY, HOLD, or SELL**, validates the result, creates an immutable proposal, and waits for human approval before executing anything.
 
-> This project is still being planned. It is not ready for live trading.
+The first production target is deliberately narrow:
 
-## Main goals
+> **One portfolio analysis per trading day, one structured recommendation set, and no execution without explicit human approval.**
 
-- Safe login for more than one user.
-- One encrypted IOL connection for each user.
-- Pages for the IOL profile, account status, and country portfolio.
-- Live and paper portfolio pages.
-- IOL transaction history and the application's own trading history.
-- A page that shows how automatic trading is going.
-- Weekly analysis using fixed trading rules and an optional AI model.
-- Optional Jev analysis and TradingView alerts.
-- Clear reasons and risk results for every decision.
-- A choice between human approval and automatic execution.
-- Order placement only after approval or automatic safety checks.
-- A paper account that keeps cash, positions, orders, and fills.
-- A private history page for each user.
-- Safe recovery after a restart or a repeated request.
-- Deployment on one OCI server.
+There is no intraday trading, no automatic approval, and no automatic live trading in this version.
 
-## Safety rules
+---
 
-- LangGraph can place orders only through the application's order service and the IOL adapter.
-- IOL passwords and tokens never go to Jev, an AI model, or TradingView.
-- TradingView cannot call IOL or place an order directly.
-- Python calculates EMA, RSI, MACD, ATR, volume, returns, and portfolio exposure before calling Jev or an AI model.
-- Jev and the AI model cannot choose the final order size, change risk limits, build an IOL request, or place an order.
-- Fixed Python code combines signals, calculates quantities, and checks risk in both modes.
-- Jev starts in shadow mode. Its result is saved, but it cannot change an order.
-- Repeated, old, invalid, unsigned, or unknown TradingView alerts are rejected or saved for review.
-- In human mode, the user must approve or reject the full plan. Approval expires after 24 hours.
-- In automatic mode, the flow continues only after all risk checks pass.
-- A large change in price, cash, or positions stops the order.
-- Real trading and automatic real trading are off by default and have separate stop switches.
-- A repeated request must not create a second order.
-- If IOL does not clearly confirm an order, the system never sends it again automatically.
-- The application counts its own IOL API calls. Past a configurable monthly limit, reads stop instead of spending money, because IOL bills for calls above its free quota.
-- PostgreSQL is the source of truth for approvals, orders, history, and recovery.
-- Passwords, tokens, and full account snapshots must not appear in logs or LangSmith traces.
+# 1. Product goal
 
-## Terminology
-
-### Trading words
-
-| Term | Meaning |
-|---|---|
-| IOL | InvertirOnline, the broker used by the first version. |
-| Portfolio | The cash and investments in an account. |
-| Position | How much of one instrument the account holds. |
-| Instrument | A tradable asset, such as a stock or bond. |
-| Symbol | The broker's short code for an instrument, such as `GGAL`. |
-| Buy, sell, hold | Buy an instrument, sell one already held, or make no trade. |
-| Order | A request to buy or sell a specific quantity at a specific price. |
-| Limit order | An order that may execute only at the selected price or better. |
-| Fill | The part of an order that has actually been bought or sold. |
-| Transaction | A completed broker operation shown in account history. |
-| Proposal | The complete trade plan shown before execution. |
-| Universe | The instruments the project may trade, each ticker with its paper name, declared in `config/universe.toml`. |
-| Exposure | How much of the portfolio is invested in one instrument or market. |
-| Turnover | How much of the portfolio the plan wants to trade in one run. |
-| Paper trading | Simulated trading. No real money or real IOL order is used. |
-| Live trading | Real trading through the broker. |
-| Paper ledger | The saved record of paper cash, positions, orders, and fills. |
-| Reconciliation | Checking saved orders against later broker or paper results. |
-| Kill switch | An emergency control that stops new live orders immediately. |
-
-### Market indicators
-
-| Term | Meaning |
-|---|---|
-| EMA | Exponential Moving Average. A price average that gives more weight to recent prices and helps show the trend. |
-| RSI | Relative Strength Index. A 0–100 measure of recent buying or selling strength. |
-| MACD | Moving Average Convergence Divergence. A momentum indicator that compares two moving averages. |
-| ATR | Average True Range. A measure of how much the price normally moves, not whether it is going up or down. |
-| Returns | The percentage gain or loss over a selected period. |
-| Volume | How much of an instrument was traded. |
-| Market regime | A simple description of the market, such as trending, sideways, or volatile. |
-
-### Application words
-
-| Term | Meaning |
-|---|---|
-| LangGraph | The workflow tool that connects analysis, approval, and order submission. |
-| LLM | A large language model used for optional analysis. It cannot place orders. |
-| Jev | An optional analysis component. It returns a structured buy, hold, or sell view. |
-| Shadow mode | A safe test mode. The result is saved and shown, but it cannot affect the decision. |
-| TradingView | An external charting tool that can send alerts to the application. |
-| Pine Script | TradingView's scripting language, used here to create alerts. |
-| Webhook | An HTTP call sent by another system when something happens. |
-| DecisionPolicy | Fixed Python code that makes the final trading decision from accepted inputs. |
-| Human in the loop | The workflow waits for a person to approve or reject the plan. |
-| Automatic mode | The workflow can continue without a person after all checks pass. |
-| Run | One complete analysis and possible execution cycle. |
-| Snapshot | A saved copy of account or market data at one moment. |
-| Stale data | Saved data that could not be refreshed and may no longer be current. |
-| Idempotency | Protection that makes a repeated request produce the same result instead of a duplicate order. |
-| Adapter | The module that translates between the application and one external system, such as IOL. |
-| Source of truth | The system whose saved data wins when another copy is missing or different. |
-
-### Technology and operations
-
-| Term | Meaning |
-|---|---|
-| OCI | Oracle Cloud Infrastructure, the cloud service used to host the application. |
-| VM | Virtual machine, the cloud server that runs the application. |
-| Docker | Tool used to package the application and database so they run the same way everywhere. |
-| Docker Compose | Tool used to start the application, database, and web proxy together. |
-| FastAPI | The Python framework used for pages, API routes, and webhooks. |
-| PostgreSQL | The database that stores users, portfolios, proposals, orders, and history. |
-| API | A programming interface used by the application or browser to request data or actions. |
-| REST API | The HTTP API style used by IOL. |
-| HTTPS | Encrypted web traffic. |
-| CSRF | Protection against another website submitting a form using the user's login. |
-| Session | The server-side login record created after a successful password check. |
-| Argon2id | The password-hashing method used to protect stored passwords. |
-| LangSmith | The service used to inspect AI workflow traces after private data is removed. |
-| Health check | A small endpoint that shows whether the application or database is ready. |
-| Fixture | A saved example response used in tests, with private data removed. |
-| Tenant isolation | The rule that one user can never see or change another user's data. |
-
-## Planned user flow
-
-1. Log in to the application.
-2. Connect and test an IOL account.
-3. View the IOL profile, account status, and portfolio for the selected country.
-4. Review IOL transactions and the application's full trading history.
-5. Start a weekly analysis or open the automatic-trading monitor.
-6. Review BUY, SELL, and HOLD recommendations.
-7. Choose `HUMAN_IN_THE_LOOP` or `AUTOMATIC` for the strategy.
-8. In human mode, approve or reject the complete proposal. In automatic mode, let the graph continue after risk checks.
-9. Let LangGraph call the paper or IOL execution service.
-10. Follow automatic runs, order status, fills, warnings, and kill-switch state.
-11. Review all activity in the personal trading-history page.
-
-## Technology stack
-
-| Area | Technology | Purpose |
-|---|---|---|
-| Language | Python 3.12 | Application and trading logic |
-| Web application | FastAPI | HTML pages, API routes, authentication, and health checks |
-| Frontend | Jinja2 templates, HTML, CSS, and small JavaScript | Server-rendered MVP interface |
-| Agent workflow | LangGraph | Analysis, signal collection, approval routing, and order-submission orchestration |
-| Optional analysis | Jev | Structured BUY/HOLD/SELL, regime, confidence, and probabilities; shadow mode first |
-| External signals | TradingView and Pine Script webhooks | Optional authenticated alerts persisted before graph processing |
-| AI observability | LangSmith | Redacted model and workflow traces |
-| Database | PostgreSQL | Users, sessions, portfolios, proposals, approvals, orders, and history |
-| ORM | SQLAlchemy 2 | Database access and initial table creation |
-| Validation/configuration | Pydantic and Pydantic Settings | Typed data models and environment configuration |
-| HTTP client | `httpx` | Asynchronous IOL and webhook requests |
-| Authentication | Argon2id and server-side sessions | Password hashing and secure application login |
-| Testing | `pytest` | Unit, integration, security, workflow, and browser-flow tests |
-| Packaging/deployment | Docker and Docker Compose | Repeatable local and OCI environments |
-| HTTPS proxy | Caddy or Nginx | TLS termination and secure routing |
-| Hosting | Oracle Cloud Infrastructure | Single-node MVP deployment |
-| Broker integration | IOL REST API | Profile, account status, country portfolios, transactions, market data, and orders |
-
-React is not required for the first week. The application keeps its web/API boundary clear so a React frontend can be added later without changing strategy, risk, approval, or execution services.
-
-## Architecture
-
-The first version uses one repository, one FastAPI process, and one PostgreSQL database.
-
-### System context
-
-```mermaid README.md
-flowchart LR
-    U[User browser] -->|HTTPS| P[Caddy or Nginx]
-    P --> A[FastAPI application]
-
-    subgraph APP[Application modules]
-        WEB[Pages and API]
-        AUTH[Login and sessions]
-        GRAPH[LangGraph trading flow]
-        SIGNALS[Signal intake and validation]
-        EXEC[Typed order execution service]
-        RECON[Order reconciliation]
-        HISTORY[Trading history]
-    end
-
-    A --> WEB
-    A --> AUTH
-    A --> GRAPH
-    A --> SIGNALS
-    A --> EXEC
-    A --> RECON
-    A --> HISTORY
-
-    WEB --> DB[(PostgreSQL)]
-    AUTH --> DB
-    GRAPH --> DB
-    SIGNALS --> DB
-    EXEC --> DB
-    RECON --> DB
-    HISTORY --> DB
-
-    WEB --> IOL[IOL profile, account, portfolio, and transactions]
-    GRAPH --> IOL
-    EXEC --> IOL
-    RECON --> IOL
-    GRAPH --> JEV[Jev - optional and shadow first]
-    GRAPH --> LLM[LLM provider - optional]
-    GRAPH -. redacted traces .-> LS[LangSmith]
-    TV[TradingView Pine alerts] -->|authenticated webhook| SIGNALS
-    SIGNALS --> GRAPH
-    A --> WH[Webhook notifications]
-```
-
-### LangGraph trading flow
-
-The graph supports two independent settings:
-
-- `approval_mode`: `HUMAN_IN_THE_LOOP` or `AUTOMATIC`.
-- `execution_mode`: `PAPER` or `LIVE`.
-
-In human mode, LangGraph pauses and continues only after the user approves. In automatic mode, it follows the automatic branch. Both branches use the same risk checks and fresh-data check. The order step calls the application's order service. The IOL adapter keeps passwords, tokens, and broker requests away from every AI component.
-
-Python first calculates EMA, RSI, MACD, ATR, volume, returns, and portfolio exposure. The rule-based strategy uses those values. Jev may read the same values and return buy, hold, sell, market regime, confidence, and probabilities. In shadow mode, its result is saved and shown, but DecisionPolicy does not use it. A TradingView alert is also saved first. It becomes a decision input only after it is explicitly accepted. Later, when Jev is active, disagreement or low confidence may lead to deeper AI analysis. DecisionPolicy makes the final decision before sizing and risk checks.
-
-```mermaid README.md
+```mermaid
 flowchart TD
-    TV[TradingView alert] --> INTAKE[FastAPI webhook validation]
-    INTAKE -->|Valid and fresh| PERSIST[Persist external signal]
-    INTAKE -->|Duplicate, stale, invalid, or unknown symbol| QUARANTINE[Reject or quarantine]
+    START[Manual analysis / daily cron] --> PORT[IOL portfolio]
+    PORT --> DATA[IOL daily market data]
+    DATA --> IND[Python technical indicators]
+    IND --> CTX[Portfolio analysis context]
+    CTX --> AI[OpenAI portfolio analyst]
+    AI --> VALIDATE[Validate structured advice]
+    VALIDATE --> POLICY[Deterministic sizing + risk]
+    POLICY --> PROPOSAL[Immutable proposal]
+    PROPOSAL --> REVIEW{Human review}
 
-    START([Start scheduled, manual, or signal-aware run]) --> PORT[Load IOL or paper portfolio]
-    PORT --> MARKET[Load IOL market data]
-    MARKET --> FEATURES[Python: EMA, RSI, MACD, ATR, volume, returns, exposure]
-    FEATURES --> RULES[Rule-based strategy]
-    RULES --> COLLECT[Collect optional signals]
-    PERSIST --> COLLECT
-    COLLECT --> JEV[Optional Jev analysis]
-    JEV --> SHADOW{Jev shadow mode?}
-    SHADOW -->|Yes| RECORD[Record Jev result for evaluation only]
-    SHADOW -->|No and disagreement or low confidence| LLM[Optional deeper LLM analysis]
-    SHADOW -->|No| POLICY[Deterministic DecisionPolicy]
-    RECORD --> POLICY
-    LLM --> POLICY
-    POLICY --> SIZE[Deterministic sizing]
-    SIZE --> RISK[Deterministic risk checks]
-    RISK -->|Rejected| STOP[Record no trade]
-    RISK -->|Passed| SAVE[Save immutable trade plan]
-    SAVE --> MODE{Approval mode}
+    REVIEW -->|Reject| STOP[Stop]
+    REVIEW -->|Approve| RECHECK[Refresh portfolio, prices and cash]
 
-    MODE -->|Human in the loop| WAIT[Pause for user approval]
-    WAIT -->|Rejected or expired| STOP
-    WAIT -->|Approved| RECHECK[Check current portfolio and prices]
+    RECHECK -->|Material change| STOP
+    RECHECK -->|Valid| EXEC[Order execution service]
 
-    MODE -->|Automatic| AUTO[Check automatic-trading limits]
-    AUTO -->|Blocked| STOP
-    AUTO -->|Allowed| RECHECK
-
-    RECHECK -->|Material change| REVIEW[Create a new plan or stop]
-    RECHECK -->|Valid| SUBMIT[Submit orders through execution service]
-    SUBMIT --> RESULT[Save broker response]
-    RESULT --> END([Graph run complete])
-
-    RESULT -. asynchronous .-> RECONCILE[Independent order reconciler]
-    RECONCILE --> HISTORY[Update trading history]
+    EXEC --> PAPER[Paper executor]
+    EXEC -. later .-> LIVE[IOL live executor]
+    PAPER --> HISTORY[Trading history]
 ```
 
-### Main application boundaries
+The model advises. Python validates, sizes, applies hard limits, and controls execution.
 
-```mermaid README.md
-flowchart LR
-    UI[Web pages and API] --> GRAPH[LangGraph trading flow]
-    UI --> APPROVAL[Human approval action]
-    UI --> QUERY[Portfolio and history queries]
+---
 
-    GRAPH --> FEATURES[Python indicators]
-    FEATURES --> STRATEGY[Rule-based strategy]
-    GRAPH --> SIGNALS[Optional signal intake]
-    SIGNALS -->|shadow or not accepted| AUDIT[Record only]
-    SIGNALS -->|accepted active signals| POLICY[Deterministic DecisionPolicy]
-    STRATEGY --> POLICY
-    POLICY --> SIZING[Deterministic sizing]
-    SIZING --> RISK[Deterministic risk]
-    RISK --> ROUTE[Approval-mode router]
-    APPROVAL --> ROUTE
-    ROUTE --> EXECUTION[Execution service]
-    EXECUTION --> OE[OrderExecutor port]
-    QUERY --> PS[PortfolioSource port]
-    GRAPH --> MD[MarketDataProvider port]
-    TV[TradingView webhook adapter] -. persist only first .-> SIGNALS
-    JEV[Jev adapter] -. shadow result .-> AUDIT
+# 2. What stays from the existing repository
 
-    IOL[IOL adapter] -. implements .-> OE
-    IOL -. implements .-> PS
-    IOL -. implements .-> MD
-    SIM[Paper-trading adapter] -. implements .-> OE
-    SIM -. implements .-> PS
+Do **not** restart the project from zero.
+
+The following parts are already useful and should remain:
+
+- FastAPI application.
+- Login, sessions, CSRF protection, and user isolation.
+- PostgreSQL persistence.
+- Encrypted IOL connections.
+- IOL authentication and token refresh.
+- IOL profile, account-status, portfolio, quote, and price-history reads.
+- IOL call-budget protection.
+- Broker-independent portfolio/domain models.
+- Exact `Money` handling.
+- EMA, RSI, MACD, ATR, volume, returns, and portfolio-exposure calculations.
+- Saved snapshots.
+- Paper ledger.
+- Proposal persistence.
+- Approval and rejection.
+- Fresh-data re-check before execution.
+- Idempotent order creation.
+- `OrderExecutor` abstraction.
+- `PaperOrderExecutor`.
+- Trading-event history.
+- Existing LangGraph infrastructure.
+
+The main architectural change is:
+
+```text
+OLD PRIMARY DECISION PATH
+
+universe
+ -> scanner
+ -> technical score
+ -> fundamental/news score
+ -> finalists
+ -> rule-based decision
+
+
+NEW PRIMARY DECISION PATH
+
+existing portfolio + allowed watchlist opportunities
+ -> normalized daily market evidence
+ -> OpenAI portfolio analysis
+ -> deterministic validation / sizing / risk
+ -> proposal
 ```
 
-### OCI deployment
+The existing rule-based decision may remain as a fallback for tests and temporary OpenAI failures, but it is no longer the primary decision source.
 
-```mermaid README.md
-flowchart TB
-    INTERNET[Internet] -->|HTTPS 443| PROXY
+---
 
-    subgraph OCI[Oracle Cloud VM]
-        PROXY[Caddy or Nginx container]
-        API[FastAPI container - one worker]
-        DB[(PostgreSQL container)]
-        VOL[(Persistent block volume)]
+# 3. Core design rules
 
-        PROXY --> API
-        API --> DB
-        DB --> VOL
-    end
+1. IOL credentials, passwords, bearer tokens, sessions, and raw private broker payloads never reach OpenAI.
+2. OpenAI receives only normalized portfolio and market-analysis context.
+3. The LLM returns advice, not broker requests.
+4. The LLM cannot call `OrderExecutor`.
+5. Hard portfolio limits and position sizing remain deterministic Python code.
+6. Unknown symbols and malformed model responses are rejected before a proposal exists.
+7. Every held position is analyzed even if it is not present in the configured watchlist.
+8. New BUY recommendations may only target configured allowed instruments.
+9. A saved proposal is immutable.
+10. The complete proposal requires explicit human approval.
+11. Approval is single-use and expires.
+12. Portfolio, prices, holdings, and cash are refreshed before execution.
+13. Orders are persisted before submission.
+14. Repeated requests must never create duplicate orders.
+15. Paper trading is the default and only enabled execution mode during the MVP.
+16. Live execution is a later capability behind the same `OrderExecutor` port.
+17. One OpenAI call analyzes the portfolio as a whole; do not call the model once per asset.
+18. Multi-agent analysis is postponed until one portfolio analyst proves insufficient.
 
-    API -->|HTTPS| IOL[IOL API]
-    API -->|HTTPS| AI[Jev, LLM, and LangSmith]
-    TV[TradingView] -->|HTTPS webhook| PROXY
-    API -->|HTTPS| WEBHOOK[Notification webhook]
+---
 
-    ADMIN[Restricted administrator] -->|SSH| OCI
+# 4. Target analysis scope
+
+The **existing IOL portfolio is the center of every run**.
+
+For every held position, the analysis context should contain, when available:
+
+```text
+symbol
+name
+category
+quantity
+available quantity
+average cost
+current price
+market value
+portfolio weight
+unrealized gain/loss
+EMA
+RSI
+MACD
+ATR
+volume
+recent returns
+data timestamp
+missing/stale-data warnings
 ```
 
-### Important boundary
+Portfolio-level context should contain:
 
-This is an automatic trading system, not only a recommendation system. LangGraph controls the trading flow and can reach order submission in either mode. It calls fixed order-handling code, and that code calls the IOL adapter.
+```text
+cash
+total portfolio value
+position concentration
+portfolio limits
+analysis timestamp
+country
+```
 
-Jev and the AI model can help with the decision, but they never receive IOL passwords or tokens and cannot skip DecisionPolicy, sizing, or risk checks. TradingView only sends alerts through a checked webhook. Only the order service can reach the IOL adapter, and only that adapter creates the IOL request and handles broker login.
+A configured watchlist may add a small number of possible new BUY opportunities.
 
-## Frontend pages
+The model should reason about the whole portfolio, not each instrument independently.
 
-The first web pages will include:
+---
 
-- **Login** — secure application login.
-- **Dashboard** — account summary, portfolio value, recent transactions, and automatic-trading status.
-- **IOL connection** — save and test encrypted credentials.
-- **My IOL profile** — safe fields from `GET /api/v2/datos-perfil`; never show credentials or tokens.
-- **Account status** — balances and account information from `GET /api/v2/estadocuenta`, with source and refresh time.
-- **Country portfolio** — positions from `GET /api/v2/portafolio/{pais}`, with a validated country selector.
-- **Paper portfolio** — paper cash, positions, value, and fills.
-- **Transaction history** — IOL operations plus local proposals, approvals, orders, fills, cancellations, and failures. Show source, paper/live mode, filters, and detail views.
-- **New weekly analysis** — manual analysis settings.
-- **Analysis status** — current node, progress, result, or safe error.
-- **Strategy settings** — human-in-the-loop or automatic mode, paper/live mode, schedule, limits, and the trading universe.
-- **Proposal review** — evidence, decision, quantities, risks, and approval controls for human mode.
-- **Automatic trading monitor** — enabled/disabled state, paper/live state, next and last run, current graph node, last heartbeat, latest decision, active orders, fills, rejected risk checks, stale-data warnings, failures, and reconciliation status.
-- **Automatic trading controls** — pause/resume paper automation, disable automatic execution, and activate the live kill switch. Enabling live automatic trading requires a separate protected action and remains off by default.
-- **Jev evaluation** — shadow-mode results and comparison with the rule-based decision.
-- **TradingView signals** — accepted, duplicate, stale, invalid, and unknown-symbol alerts.
-- **Trade/order detail** — proposal, approval route, broker ID, and all status events.
-- **Operations** — failed runs and unknown orders for authorized users.
+# 5. Step 0 — Remove or retire obsolete architecture
 
-Profile, account, portfolio, history, and monitor pages show the latest saved snapshot immediately. A refresh calls IOL through the backend and saves a new snapshot. If the refresh fails, the last snapshot stays visible and is marked stale. Known data is never deleted.
+No database table needs to be dropped.
 
-A separate React application is not needed for the first release. The backend has clear boundaries, so React can replace the HTML pages later without changing the trading rules.
+The existing persistence model is compatible with the new workflow and should be reused.
 
-## Trading universe and analysis funnel
+## 5.1 Remove from the active decision path
 
-The instruments the project may trade are declared in one file,
-[`config/universe.toml`](config/universe.toml): every ticker with its paper
-name, grouped into `argentina_stocks`, `cedears`, and `bonds`. Nothing in the
-code names a symbol, so changing the universe is a data edit and not a code
-change. The same file holds the portfolio constraints and the widths of the
-analysis funnel.
+The following concepts should stop being part of the main analysis pipeline:
 
-A run narrows the universe before it sizes anything expensive:
+```text
+market scanner as mandatory first stage
+10-12 candidate funnel
+technical ranking as a required selection gate
+fundamental/news deterministic placeholder as a required stage
+finalist selection
+Jev
+TradingView
+automatic execution branch
+```
 
-1. **Market scanner** — every configured instrument is read from cheap
-   price-history snapshots and reduced to the 10-12 strongest candidates on
-   trend, momentum, and liquidity.
-2. **Technical analysis** — EMA, RSI, MACD, and ATR are scored on those
-   candidates only.
-3. **Fundamental/news analysis** — one outside view per candidate, cut to about
-   5 finalists. The view comes through the `FundamentalAnalyzer` port; the
-   shipped adapter is a documented deterministic placeholder that needs no key
-   and no network, so the funnel runs end to end today. A news or language-model
-   adapter replaces it behind the same port later.
-4. **Risk manager** — the finalists are turned into at most a few orders under
-   the portfolio constraints.
+Do not delete unrelated working infrastructure simply because it is not currently used.
 
-The constraints, all in `config/universe.toml`:
+## 5.2 Classes/code to retire or simplify
 
-| Constraint | Meaning |
-|---|---|
-| `max_open_positions` | How many positions the account may hold at once. |
-| `max_argentina_stock_positions` | How many of them may be Argentine stocks. |
-| `max_cedear_positions` | How many may be CEDEARs. |
-| `max_bond_positions` | How many may be bonds. |
-| `max_single_position_pct` | Largest share of the portfolio one position may reach. A buy tops its position up to this limit. |
-| `min_cash_pct` | Smallest share of the portfolio that must stay in cash. |
-| `max_trades_per_run` | How many orders one run may place, which is what bounds how much a run turns over. |
+After checking references and tests, deprecate or remove the following **if they exist only for the old funnel**:
 
-Only a finalist may be bought in a run. A held instrument outside the finalists
-is still judged, and may be sold when the strategy says so, so the money is
-never trapped.
+```text
+CandidateView
+FinalistView
+FundamentalAnalyzer
+DeterministicFundamentals
+candidate/finalist scoring code
+mandatory market-scanner selection code
+funnel-specific combined-score code
+```
 
-## Trading history
+If `app/domain/portfolio_selection.py` exists only to implement the old funnel, remove it after the new analysis path is covered by tests.
 
-Each user will have a private history page with two clearly labeled sources:
+Keep `config/universe.toml`, but change its responsibility from:
 
-- **IOL transaction history:** operations returned by confirmed IOL order endpoints.
-- **Application trading history:** the local event log. Events are added but never edited or deleted in normal use.
+```text
+mandatory 34 -> 10-12 -> ~5 funnel
+```
 
-The local log contains:
+to:
 
-- Analysis started, completed, or failed.
-- Trade plan created, automatically authorized, manually approved, rejected, or expired.
-- Approval mode, execution mode, and rule-based recommendations.
-- Jev shadow/active output, accepted or rejected TradingView signals, optional LLM output, final `DecisionPolicy`, and risk results.
-- Order prepared, submitted, accepted, unknown, filled, rejected, or cancelled.
-- Paper fills and paper-portfolio changes.
+```text
+watchlist + allowed new instruments + portfolio constraints
+```
 
-Imported IOL transactions are matched by connection and broker operation ID, so a refresh does not create duplicates. Every query includes the logged-in user ID. Passwords, tokens, and unsafe raw broker responses are never shown in the history.
+## 5.3 Keep these old concepts
 
-## Broker boundaries
+Do **not** remove:
 
-IOL-specific details stay inside the IOL adapter. The rest of the application uses shared models for:
+```text
+Proposal
+Recommendation
+RiskCheck
+Approval
+Order
+OrderResult
+TradingEvent
+PaperLedger
+PaperPosition
+Portfolio
+Position
+Money
+IndicatorEvidence
+OrderExecutor
+PaperOrderExecutor
+```
 
-- Instruments
-- Account and market snapshots
-- Recommendations
-- Proposal versions
-- Order intents
-- Broker order IDs
-- Order events
+## 5.4 Migration rule
 
-The shared trading models live in `app/domain/trading.py` (paper ledger, indicator evidence, risk checks, recommendations, and proposals) and the exact money type in `app/domain/money.py`. The shared portfolio format lives in `app/domain/portfolio.py`. Instruments, positions, cash, and country portfolios are defined there, independent of any broker. Day 3 maps IOL responses into it inside the adapter, so pages and later strategies never depend on an IOL field name.
+Do not perform a large deletion first.
 
-The first version does not include IBKR. A future broker should use the same portfolio, market-data, and order interfaces without changing the strategy, risk, or approval logic.
+Use this sequence:
 
-## Repository status
+```text
+1. introduce the new PortfolioAdvisor path
+2. migrate tests
+3. switch the graph to the new path
+4. verify end-to-end paper flow
+5. remove code that has no remaining references
+```
 
-This README is the implementation plan. Day 1 (FastAPI, login, PostgreSQL, Docker Compose, and health checks), Day 2 (encrypted IOL connections, profile, and account status), Day 3 (country portfolio and market-data reads, with IOL call budgeting), Day 4 (Python indicators, a paper ledger, a rule-based strategy, fixed risk checks, and an immutable proposal), and Day 5 (the LangGraph flow with a single-use human approval, a fresh-data re-check, paper execution, and a local trading history) are implemented. See [day1/README.md](day1/README.md), [day2/README.md](day2/README.md), [day3/README.md](day3/README.md), [day4/README.md](day4/README.md), and [day5/README.md](day5/README.md) for setup and startup instructions. Later trading features are still planned; there is no live trading, and orders are applied only to the paper ledger.
+**Done when:** there is one clear primary analysis path and the old funnel is either removed or isolated as unused legacy code.
 
-Planned structure:
+---
 
-```text README.md
+# 6. Target class model
+
+```mermaid
+classDiagram
+
+    class Portfolio {
+        +str country
+        +Money cash
+        +list~Position~ positions
+        +Money total_value()
+        +Position? position_for(symbol)
+    }
+
+    class Position {
+        +str symbol
+        +str name
+        +str category
+        +Decimal quantity
+        +Decimal available_quantity
+        +Money? average_cost
+        +Money current_price
+        +Money market_value
+        +float weight
+    }
+
+    class IndicatorEvidence {
+        +str symbol
+        +Money last_price
+        +float? ema_fast
+        +float? ema_slow
+        +float? rsi
+        +float? macd_histogram
+        +float? atr
+        +float? average_volume
+        +float? return_fraction
+        +int observations
+        +bool stale
+    }
+
+    class PortfolioAnalysisContext {
+        +str country
+        +datetime analysed_at
+        +Portfolio portfolio
+        +list~IndicatorEvidence~ evidence
+        +list~AllowedInstrument~ watchlist
+        +PortfolioConstraints constraints
+        +list~str~ warnings
+    }
+
+    class AllowedInstrument {
+        +str symbol
+        +str name
+        +str category
+    }
+
+    class PortfolioConstraints {
+        +int max_open_positions
+        +float max_single_position_pct
+        +float min_cash_pct
+        +int max_trades_per_run
+        +dict category_caps
+    }
+
+    class AssetAdvice {
+        +str symbol
+        +Action action
+        +float confidence
+        +str rationale
+        +list~str~ risks
+    }
+
+    class PortfolioAdvice {
+        +str summary
+        +list~AssetAdvice~ decisions
+        +str model_provider
+        +str model_name
+        +str analysis_version
+    }
+
+    class PortfolioAdvisor {
+        <<port>>
+        +analyze(PortfolioAnalysisContext) PortfolioAdvice
+    }
+
+    class OpenAIPortfolioAdvisor {
+        +analyze(PortfolioAnalysisContext) PortfolioAdvice
+    }
+
+    class DeterministicPortfolioAdvisor {
+        +analyze(PortfolioAnalysisContext) PortfolioAdvice
+    }
+
+    class Recommendation {
+        +str symbol
+        +Action action
+        +Decimal quantity
+        +Money limit_price
+        +Money notional
+        +float weight_after
+        +str rationale
+        +IndicatorEvidence evidence
+        +list~RiskCheck~ risk_checks
+        +is_order() bool
+    }
+
+    class RiskCheck {
+        +str name
+        +bool passed
+        +str detail
+    }
+
+    class Proposal {
+        +str country
+        +str status
+        +Money portfolio_value
+        +Money cash
+        +PortfolioAdvice advice
+        +list~Recommendation~ recommendations
+        +list~RiskCheck~ risk_checks
+        +orders() list~Recommendation~
+        +passed_risk() bool
+    }
+
+    class Approval {
+        +str status
+        +datetime expires_at
+        +datetime? used_at
+    }
+
+    class Order {
+        +str symbol
+        +str side
+        +Decimal quantity
+        +Money limit_price
+        +Money notional
+        +str status
+        +str idempotency_key
+    }
+
+    class OrderResult {
+        +str status
+        +bool accepted
+        +Decimal filled_quantity
+        +Money filled_price
+        +str? broker_order_id
+    }
+
+    class OrderExecutor {
+        <<port>>
+        +submit(Order) OrderResult
+    }
+
+    class PaperOrderExecutor {
+        +submit(Order) OrderResult
+    }
+
+    class IOLOrderExecutor {
+        +submit(Order) OrderResult
+    }
+
+    Portfolio *-- Position
+    PortfolioAnalysisContext *-- Portfolio
+    PortfolioAnalysisContext *-- IndicatorEvidence
+    PortfolioAnalysisContext *-- AllowedInstrument
+    PortfolioAnalysisContext *-- PortfolioConstraints
+
+    PortfolioAdvice *-- AssetAdvice
+    Proposal *-- PortfolioAdvice
+    Proposal *-- Recommendation
+    Recommendation *-- IndicatorEvidence
+    Recommendation *-- RiskCheck
+    Proposal *-- RiskCheck
+
+    PortfolioAdvisor <|.. OpenAIPortfolioAdvisor
+    PortfolioAdvisor <|.. DeterministicPortfolioAdvisor
+
+    Proposal --> Approval
+    Proposal --> Order
+
+    OrderExecutor <|.. PaperOrderExecutor
+    OrderExecutor <|.. IOLOrderExecutor
+
+    Order --> OrderResult
+```
+
+## Important class-model decisions
+
+### `PortfolioAdvisor`
+
+This is the only analysis port the graph needs for the MVP.
+
+```python
+class PortfolioAdvisor(Protocol):
+    async def analyze(
+        self,
+        context: PortfolioAnalysisContext,
+    ) -> PortfolioAdvice:
+        ...
+```
+
+### `OpenAIPortfolioAdvisor`
+
+The production implementation.
+
+It:
+
+- builds the model request;
+- calls OpenAI;
+- requests structured output;
+- validates the returned schema;
+- returns `PortfolioAdvice`.
+
+It does **not**:
+
+- authenticate to IOL;
+- calculate order quantity;
+- bypass portfolio limits;
+- create orders;
+- execute trades.
+
+### `DeterministicPortfolioAdvisor`
+
+Optional fallback/test implementation.
+
+It may wrap the current rule-based decision logic so tests can run without OpenAI and a temporary model outage does not require inventing recommendations.
+
+---
+
+# 7. Target database model
+
+No new table is required for the MVP.
+
+The current tables can store the new model-backed workflow.
+
+```mermaid
+erDiagram
+
+    USERS ||--o{ SESSIONS : signs_in
+    USERS ||--o{ BROKER_CONNECTIONS : owns
+    USERS ||--o{ SNAPSHOTS : owns
+    USERS ||--o{ PROPOSALS : owns
+    USERS ||--o{ APPROVALS : decides
+    USERS ||--o{ ORDERS : owns
+    USERS ||--o{ TRADING_EVENTS : owns
+
+    BROKER_CONNECTIONS ||--o{ SNAPSHOTS : produces
+    BROKER_CONNECTIONS ||--o{ PROPOSALS : analyses
+    BROKER_CONNECTIONS ||--o{ ORDERS : submits
+    BROKER_CONNECTIONS ||--o{ TRADING_EVENTS : records
+
+    PROPOSALS ||--o{ APPROVALS : requires
+    PROPOSALS ||--o{ ORDERS : creates
+    PROPOSALS ||--o{ TRADING_EVENTS : records
+
+    ORDERS ||--o{ TRADING_EVENTS : records
+
+    USERS {
+        int id PK
+        string username UK
+        string password_hash
+        bool is_admin
+    }
+
+    SESSIONS {
+        int id PK
+        int user_id FK
+        string token_hash UK
+        string csrf_token
+        datetime expires_at
+    }
+
+    BROKER_CONNECTIONS {
+        int id PK
+        int user_id FK
+        string broker
+        string username
+        string password_encrypted
+    }
+
+    SNAPSHOTS {
+        int id PK
+        int user_id FK
+        int connection_id FK
+        string kind
+        json payload
+        bool is_stale
+        datetime created_at
+    }
+
+    PROPOSALS {
+        int id PK
+        int user_id FK
+        int connection_id FK
+        string country
+        string status
+        json payload
+        datetime created_at
+    }
+
+    APPROVALS {
+        int id PK
+        int user_id FK
+        int connection_id FK
+        int proposal_id FK
+        string status
+        datetime expires_at
+        datetime used_at
+    }
+
+    ORDERS {
+        int id PK
+        int user_id FK
+        int connection_id FK
+        int proposal_id FK
+        string symbol
+        string side
+        string status
+        string idempotency_key UK
+        json payload
+    }
+
+    TRADING_EVENTS {
+        int id PK
+        int user_id FK
+        int connection_id FK
+        int proposal_id
+        int order_id
+        string event_type
+        string category
+        datetime created_at
+    }
+```
+
+## Snapshot kinds
+
+Continue using `snapshots.kind` to identify the JSON payload:
+
+```text
+profile
+account_status
+portfolio:{country}
+price_history:{SYMBOL}
+paper_ledger:{country}
+analysis_context:{country}
+```
+
+`analysis_context:{country}` is optional. Add it only if retaining the exact normalized model input is useful for auditing.
+
+## Proposal payload
+
+`proposals.payload` should contain the immutable object that was shown to the user, including:
+
+```text
+analysis timestamp
+portfolio snapshot reference
+market-data timestamp
+model provider
+model name
+analysis version
+portfolio advice
+recommendations
+risk checks
+warnings
+```
+
+There is no need for a separate `llm_analyses` table in the MVP.
+
+If later querying model-specific fields becomes operationally important, those fields can be normalized into columns or a dedicated table through an explicit migration.
+
+---
+
+# 8. Target folder structure and responsibilities
+
+```text
 app/
-  api/
-  domain/
-  workflows/
-  services/
-  ports/
-  infrastructure/
-    iol/
-    jev/
-    tradingview/
-    simulation/
-    persistence/
-    notifications/
+│
+├── api/
+│   ├── auth.py
+│   ├── broker.py
+│   ├── portfolio.py
+│   ├── analysis.py
+│   ├── proposals.py
+│   ├── history.py
+│   └── ...
+│
+├── domain/
+│   ├── money.py
+│   ├── portfolio.py
+│   ├── indicators.py
+│   ├── analysis.py
+│   └── trading.py
+│
+├── ports/
+│   ├── portfolio_source.py
+│   ├── market_data_provider.py
+│   ├── portfolio_advisor.py
+│   └── order_executor.py
+│
+├── services/
+│   ├── broker.py
+│   ├── portfolio_analysis.py
+│   ├── indicators.py
+│   ├── policy.py
+│   ├── proposals.py
+│   ├── approvals.py
+│   ├── orders.py
+│   ├── execution.py
+│   ├── events.py
+│   └── ledger.py
+│
+├── workflows/
+│   └── trading_flow.py
+│
+├── infrastructure/
+│   ├── iol/
+│   │   ├── client.py
+│   │   ├── adapter.py
+│   │   ├── schemas.py
+│   │   ├── auth.py
+│   │   └── call_budget.py
+│   │
+│   ├── openai/
+│   │   ├── client.py
+│   │   ├── portfolio_advisor.py
+│   │   └── prompts/
+│   │       └── portfolio_analysis.md
+│   │
+│   ├── simulation/
+│   │   └── paper_executor.py
+│   │
+│   └── persistence/
+│       ├── models.py
+│       ├── repositories.py
+│       └── database.py
+│
+├── cli.py
+├── config.py
+└── main.py
+
+config/
+└── universe.toml
+
 templates/
 static/
 tests/
-docs/
 docker-compose.yml
 ```
 
-## Implementation sequence
+## Folder responsibilities
 
-This README is the current plan. Jev and TradingView are optional and must not block the first usable release. A TradingView alert can only be saved at first. It cannot start a run or place an order until cycle limits and rate limits are built and tested.
+### `app/api/`
 
-If the application restarts, it finds unfinished work in PostgreSQL. A paused human approval continues only after the approval is saved. An order saved before a broker response is checked and reconciled. It is never sent again.
+HTTP and HTML boundary only.
 
-Each day should finish with something that can be opened or tested. Do not start the next broker task if the current day's tests fail.
+Responsibilities:
 
-### Week 1 — Usable paper trading
+- validate requests/forms;
+- authentication and authorization;
+- call application services/workflows;
+- render templates or API responses.
 
-#### Day 1 — Application foundation and login
+It should not contain trading strategy logic.
 
-- Create the FastAPI project, settings, tests, Dockerfile, and Docker Compose services for the application and database.
-- Add health checks. The readiness check tests PostgreSQL and configuration only.
-- Create the base page layout, navigation, simple CSS, and an error page.
-- Add users, sessions, Argon2id password hashing, a secure login cookie, CSRF protection, and a command to create the first admin user.
-- Build login, logout, and an empty dashboard.
+### `app/domain/`
 
-**Done when:** a user can log in, log out, and see an empty dashboard. A second user cannot use the first user's session.
+Pure business types and calculations.
 
-#### Day 2 — IOL connection, profile, and account status
+Responsibilities:
 
-- Add encrypted broker connections and a page that never shows the saved password again.
-- Get an IOL token for each connection and refresh it once after an authentication error.
-- Read profile and account-status responses from safe test fixtures, then test one real read.
-- Save timestamped snapshots. A failed refresh keeps the previous snapshot and marks it stale.
-- Build the profile and account-status pages with source and refresh time.
+- `Money`;
+- portfolio and position models;
+- indicators;
+- OpenAI analysis input/output contracts;
+- recommendations;
+- proposals;
+- risk checks;
+- orders.
 
-**Done when:** the user can connect IOL and see profile and account data. Logs contain no password or bearer token.
+No HTTP, database, OpenAI, or IOL code belongs here.
 
-#### Day 3 — Country portfolio and market data
+### `app/ports/`
 
-- Read the IOL portfolio for one checked country value.
-- Map IOL symbols to internal instruments and save cash, total quantity, and available quantity in a shared format.
-- Add quote and price-history calls with timeouts. Retry only safe read requests.
-- Build the country-portfolio page with positions, prices, and snapshot time.
+Interfaces toward external systems.
 
-**Done when:** the user can refresh one country portfolio and still see the last good snapshot if IOL fails.
+Primary ports:
 
-#### Day 4 — Indicators, paper ledger, and proposal
+```text
+PortfolioSource
+MarketDataProvider
+PortfolioAdvisor
+OrderExecutor
+```
 
-- Calculate EMA, RSI, MACD, ATR, volume, returns, and portfolio exposure in Python, with tests.
-- Create the first paper ledger from a portfolio snapshot.
-- Add the rule-based buy, sell, and hold strategy.
-- Add fixed DecisionPolicy, order sizing, and risk checks.
-- Save a proposal that cannot be edited and show it on a review page. Do not place an order yet.
+Application services depend on ports, not concrete external providers.
 
-**Done when:** a manual analysis creates a readable proposal with evidence, quantities, and risk results.
+### `app/services/`
 
-Implemented. See [day4/README.md](day4/README.md). The proposal is saved and shown on the review page; approval and paper execution are Day 5.
+Use cases and deterministic business logic.
 
-#### Day 5 — Human approval and paper execution
+Responsibilities:
 
-- Build the LangGraph flow through proposal creation, an approval pause, a fresh-data check, and paper submission.
-- Approval covers the full proposal, expires after 24 hours, uses CSRF protection, and can be used only once.
-- Save the order before calling the paper executor. A paper fill updates the paper ledger.
-- Add local trading events and build the first history page.
-- Test a restart while approval is waiting and test a repeated approval request.
+- build normalized portfolio context;
+- calculate indicators;
+- validate model decisions;
+- deterministic sizing;
+- portfolio risk limits;
+- create proposals;
+- approvals;
+- orders;
+- execution orchestration;
+- paper ledger;
+- trading events.
 
-**Done when:** the browser flow runs from login to an approved paper trade, and the history page shows every step.
+### `app/workflows/`
 
-Implemented. See [day5/README.md](day5/README.md). The flow pauses for a single-use approval, re-checks the saved data, applies paper fills to the ledger, and records every step in the local history. Automatic mode is Day 6; live trading stays off.
+LangGraph orchestration only.
 
-### Week 2 — Automatic paper mode
+The workflow coordinates services and persists workflow outcomes.
 
-#### Day 6 — Automatic graph branch
+It should not contain indicator formulas, OpenAI HTTP code, IOL request construction, or order-sizing formulas.
 
-- Add automatic mode beside the existing human-approval branch.
-- Use the same sizing, risk checks, and fresh-data check. Do not make the automatic path weaker.
-- Add paper limits for order count, order value, position weight, and turnover.
-- Keep live trading and automatic live trading off with separate switches.
-- Record whether the run was approved by a person or authorized automatically.
+### `app/infrastructure/iol/`
 
-**Done when:** an automatic paper run can submit only after every risk check passes, and a failed check creates no order.
+Everything specific to IOL.
 
-#### Day 7 — Order reconciliation
+Responsibilities:
 
-- Add a separate reconciliation loop for orders that are not finished.
-- Save order events for accepted, filled, rejected, cancel pending, cancelled, and unknown states.
-- Test delayed and rejected paper fills.
-- An unclear submission is reconciled or left blocked. It is never sent again immediately.
+- authentication;
+- tokens;
+- REST requests;
+- schemas;
+- mapping raw IOL responses into domain models;
+- call budget;
+- safe read retries.
 
-**Done when:** an order can remain open after the graph ends and later reach a terminal state without resuming LangGraph.
+Raw IOL payload formats must not escape this boundary.
 
-#### Day 8 — Automatic-trading monitor
+### `app/infrastructure/openai/`
 
-- Show whether automation is on, whether it is paper or live, the last and next run, the current step, and the last heartbeat.
-- Show the latest decision, open orders, fills, rejected risk checks, stale-data warnings, failures, and reconciliation status.
-- Read this page from saved database state so it stays correct after a restart.
+Everything specific to OpenAI.
 
-**Done when:** the monitor matches the database state for a running, paused, failed, and completed paper run.
+Responsibilities:
 
-#### Day 9 — Safety controls and concurrency
+- OpenAI client;
+- model configuration;
+- structured-output request;
+- prompt templates;
+- parsing/validation into domain `PortfolioAdvice`.
 
-- Add pause and resume for paper automation, a control to disable automatic execution, and a live kill switch.
-- Allow only one run for each connection, cycle, and mode.
-- Let only one process claim a run and submit its orders.
-- Test a crash after the order is saved but before the executor returns a result.
+It must not contain order execution code.
 
-**Done when:** repeated requests, two workers, and a restart cannot create a duplicate paper order.
+### `app/infrastructure/simulation/`
 
-#### Day 10 — Notifications and automatic end-to-end test
+Paper execution implementation.
 
-- Send one webhook or log event when a proposal is ready, a run fails, or an order is accepted, unknown, filled, rejected, or cancelled.
-- A failed notification must not undo an order or approval.
-- Run the full automatic paper flow in the browser and check its history.
+### `app/infrastructure/persistence/`
 
-**Done when:** human and automatic paper modes both complete, and every important action is visible in the user's history.
+SQLAlchemy and PostgreSQL implementation details.
 
-### Week 3 — Optional signals and deployment
+### `config/universe.toml`
 
-#### Day 11 — IOL transaction history
+Data-only trading configuration.
 
-- Save a safe example of the IOL operations response and confirm that each operation has a stable ID.
-- If that ID is not confirmed, stop the import and keep the local history page.
-- Save transactions by connection and operation ID so refreshes do not create duplicates.
-- Add filters for source, date, symbol, side, status, and paper or live mode.
+Responsibilities:
 
-**Done when:** refreshing IOL transactions does not create duplicates and cannot show another user's operations.
+- allowed new instruments;
+- paper/display names;
+- categories;
+- portfolio constraints.
 
-#### Day 12 — TradingView persist-only intake
+No API keys or secrets belong here.
 
-- Add a signed webhook for TradingView Pine alerts.
-- Save valid alerts and reject or quarantine repeated, old, invalid, unsigned, and unknown-symbol alerts.
-- Build an alert-status page.
-- Do not let the webhook start a run or reach the order service.
+---
 
-**Done when:** accepted and rejected alerts are visible, and no alert can place or trigger an order.
+# 9. Ten implementation steps
 
-#### Day 13 — Jev shadow mode
+## Step 1 — Stabilize the IOL boundary
 
-- Send the calculated indicator values to Jev and check its action, market regime, confidence, and probabilities.
-- Save the result and show it beside the rule-based decision.
-- Do not pass a shadow result to DecisionPolicy, sizing, risk, or execution.
-- If Jev is unavailable, the rule-based flow continues.
+Reuse the existing IOL wrapper.
 
-**Done when:** a Jev failure or disagreement cannot change a paper order.
+Confirm these reads work through typed broker-independent models:
 
-#### Day 14 — OCI paper deployment
+```text
+authenticate
+get_profile
+get_account_status
+get_portfolio
+get_quote
+get_price_history
+```
 
-- Deploy the web proxy, one application process, and PostgreSQL with Docker Compose.
-- Open only HTTPS and restricted SSH. Keep PostgreSQL private.
-- Verify database schema creation, configure encrypted backups, and restore one backup into a test database.
-- Run the paper browser flow on OCI using real read-only IOL data.
+IOL-specific request/response JSON must remain inside `app/infrastructure/iol/`.
 
-**Done when:** the deployed paper workflow survives an application restart and its logs contain no secrets.
+Normalize market identifiers and price-history parameters inside the adapter.
 
-#### Day 15 — Hardening and live-order research
+Do not make services know IOL endpoint paths.
 
-- Test that one user cannot see another user's connections, snapshots, proposals, orders, alerts, or history.
-- Check LangSmith and application logs for passwords, tokens, and full account snapshots.
-- Research IOL order submission, lookup, cancellation, and timeout behavior with safe fixtures.
-- Leave live orders disabled unless the returned order ID and timeout recovery are proven.
+### Tests
 
-**Done when:** the paper system is deployed and the remaining live-trading gates are explicitly documented as open or passed.
+- portfolio fixture maps to `Portfolio`;
+- quotes map to domain models;
+- price history maps to normalized observations;
+- stale snapshot survives IOL failure;
+- token refresh does not leak credentials.
 
-### Later
+**Done when:** the rest of the codebase can work entirely with domain objects.
 
-- Compare Jev with the rule-based strategy and paper results. DecisionPolicy may use Jev only after an explicit acceptance change.
-- When Jev is active, disagreement or low confidence may lead to deeper AI analysis. The AI model still cannot size, set risk, or place orders.
-- A valid TradingView alert may become a DecisionPolicy input only after cycle and rate limits exist. It never calls IOL directly.
-- Enable live orders only after order-response, timeout recovery, duplicate protection, restart, and reconciliation tests pass. Automatic live trading stays off by default.
+---
 
-## Running the project
+## Step 2 — Build `PortfolioAnalysisContext`
 
-See [day1/README.md](day1/README.md) for the Day 1 startup guide (Docker Compose, local Python setup, admin creation, health checks, and tests), [day2/README.md](day2/README.md) for the Day 2 guide (credential-encryption key, connecting an IOL account, reading the profile and account status, and one real read), [day3/README.md](day3/README.md) for the Day 3 guide (country portfolio, quotes and price history, and the IOL monthly call budget), [day4/README.md](day4/README.md) for the Day 4 guide (indicators, the paper ledger, the strategy and risk limits, and the proposal review page), and [day5/README.md](day5/README.md) for the Day 5 guide (the approval flow, the fresh-data check, paper execution, and the history page). Database tables are created automatically when the app or CLI starts; no migration tool is used. Schema changes after Day 1 will require an explicit upgrade plan.
+Create:
 
-Never commit real passwords or tokens. Copy `.env.example` to the ignored `.env` file and replace its placeholders.
+```text
+app/domain/analysis.py
+app/services/portfolio_analysis.py
+```
 
-## Market-data reads
+Add:
 
-Price history is read from `GET /api/v2/{mercado}/Titulos/{simbolo}/Cotizacion`. Two parts of that path are easy to get wrong, and together they produced empty price snapshots that the analysis then reported as "not enough history":
+```python
+PortfolioAnalysisContext
+AllowedInstrument
+PortfolioConstraints
+```
 
-- The market segment must be uppercase. IOL answers `404` for `bcba`, while the portfolio payload reports the market lowercased.
-- The adjustment segment must be `SinAjustar` or `Ajustada`, not a boolean.
+The context contains:
 
-Both are normalised inside the IOL adapter, and the read path uppercases the market before the request is built, so a market stored in any case reaches IOL correctly.
+```text
+current portfolio
+cash
+weights
+daily technical evidence
+allowed new instruments
+portfolio constraints
+timestamps
+warnings
+```
 
-A failed history read never stops an analysis and is never disguised as missing data. The run continues on whatever history is already saved, and the analysis page shows one warning naming each affected symbol and the reason, for example `Could not refresh the price history for GGAL (The broker does not know ...). Those symbols are judged on saved data and may show as not enough history.` A failed refresh marks the existing snapshot stale; it never deletes it.
+Every current holding must appear even if absent from `universe.toml`.
 
-## Security
+### Tests
 
-Do not report security problems in a public issue. Contact the repository owner privately.
+- held symbol outside watchlist is included;
+- watchlist-only symbol may be considered for BUY;
+- invalid/duplicate watchlist symbol is rejected;
+- stale/missing market data becomes a warning rather than fabricated evidence.
 
-Never commit:
+**Done when:** one typed object fully describes what OpenAI is allowed to analyze.
 
-- IOL usernames or passwords.
-- IOL bearer tokens.
-- Unredacted profile, account, portfolio, or transaction API responses.
-- Jev or LLM API keys.
-- TradingView webhook secrets.
-- Session secrets.
-- Credential-encryption keys.
-- Database backups containing user data.
-- Postman collections modified with real credentials.
+---
 
-## Disclaimer
+## Step 3 — Normalize daily market evidence
 
-This is automatic trading software and can place orders when live trading is enabled. It does not guarantee returns and is not financial advice. Trading can cause losses. Keep automatic live trading off until all safety checks pass and an authorized person has reviewed the deployment.
+Reuse the existing:
+
+```text
+EMA
+RSI
+MACD
+ATR
+volume
+returns
+exposure
+```
+
+Ensure the analysis uses **daily observations**, not accidental intraday rows.
+
+Store or calculate:
+
+```text
+last_price
+EMA fast
+EMA slow
+RSI
+MACD histogram
+ATR
+average volume
+recent return
+observation count
+stale/missing-data state
+```
+
+Do not turn all indicators into a mandatory synthetic technical score.
+
+They are evidence supplied to the portfolio analyst and to deterministic risk code where appropriate.
+
+### Tests
+
+- daily normalization;
+- insufficient-history behavior;
+- stale history;
+- deterministic indicator values.
+
+**Done when:** every analyzed symbol has valid daily evidence or an explicit reason why evidence is missing.
+
+---
+
+## Step 4 — Convert `universe.toml` into watchlist + constraints
+
+Keep centralized TOML configuration.
+
+Example:
+
+```toml
+[[instruments]]
+symbol = "YPFD"
+name = "YPF"
+category = "argentina_stock"
+
+[[instruments]]
+symbol = "VIST"
+name = "Vista Energy"
+category = "argentina_stock"
+
+[[instruments]]
+symbol = "SPY"
+name = "SPDR S&P 500 ETF"
+category = "cedear"
+
+[[instruments]]
+symbol = "AL30"
+name = "Bono AL30"
+category = "bond"
+
+[constraints]
+max_open_positions = 8
+max_single_position_pct = 0.15
+min_cash_pct = 0.10
+max_trades_per_run = 3
+
+[constraints.category_caps]
+argentina_stock = 4
+cedear = 3
+bond = 2
+```
+
+The watchlist limits possible **new positions**.
+
+Existing holdings are always reviewed.
+
+No symbol may be hardcoded in application Python.
+
+### Tests
+
+- TOML validation;
+- duplicate ticker detection;
+- unknown category rejection;
+- held non-watchlist symbol remains analyzable.
+
+**Done when:** changing the investment universe requires only a TOML edit.
+
+---
+
+## Step 5 — Define the OpenAI analysis contract
+
+Add structured domain output.
+
+Recommended MVP action set:
+
+```text
+BUY
+HOLD
+SELL
+```
+
+Keep the first version small.
+
+Example:
+
+```python
+class AssetAdvice(BaseModel):
+    symbol: str
+    action: Literal["BUY", "HOLD", "SELL"]
+    confidence: float
+    rationale: str
+    risks: list[str]
+
+
+class PortfolioAdvice(BaseModel):
+    summary: str
+    decisions: list[AssetAdvice]
+    model_provider: str
+    model_name: str
+    analysis_version: str
+```
+
+Validation rules:
+
+- `SELL` only makes sense for held positions;
+- `BUY` must target a held position or an allowed new instrument;
+- every symbol must be known;
+- confidence must be within a defined range;
+- duplicates are rejected;
+- model output cannot provide executable quantity or broker payload.
+
+Configuration belongs in environment settings:
+
+```text
+OPENAI_API_KEY=
+OPENAI_MODEL=
+OPENAI_BASE_URL=
+OPENAI_TIMEOUT_SECONDS=
+```
+
+### Tests
+
+- valid structured response;
+- unknown symbol;
+- unsupported action;
+- duplicate decision;
+- malformed response;
+- missing decision fields.
+
+**Done when:** no free-form model response can become a proposal without typed validation.
+
+---
+
+## Step 6 — Implement `PortfolioAdvisor`
+
+Add:
+
+```text
+app/ports/portfolio_advisor.py
+app/infrastructure/openai/client.py
+app/infrastructure/openai/portfolio_advisor.py
+```
+
+Port:
+
+```python
+class PortfolioAdvisor(Protocol):
+    async def analyze(
+        self,
+        context: PortfolioAnalysisContext,
+    ) -> PortfolioAdvice:
+        ...
+```
+
+The OpenAI adapter performs **one portfolio-level request per analysis**.
+
+Input:
+
+```text
+portfolio
+positions
+cash
+weights
+daily indicators
+recent returns
+allowed watchlist opportunities
+portfolio constraints
+warnings
+```
+
+Output:
+
+```text
+portfolio summary
+BUY / HOLD / SELL per relevant symbol
+confidence
+short rationale
+risks
+```
+
+Also keep:
+
+```text
+DeterministicPortfolioAdvisor
+```
+
+as a test/offline fallback if desired.
+
+The fallback should be explicit in the saved event/history so a user can see that OpenAI was not used.
+
+### Tests
+
+Use a fake OpenAI client.
+
+Unit tests must never spend OpenAI API calls.
+
+**Done when:** a fake structured OpenAI response becomes a typed `PortfolioAdvice`.
+
+---
+
+## Step 7 — Simplify the LangGraph workflow
+
+The project already uses LangGraph. Do not migrate again.
+
+Target graph:
+
+```text
+start
+  ↓
+load_portfolio
+  ↓
+load_market_data
+  ↓
+calculate_indicators
+  ↓
+build_analysis_context
+  ↓
+analyse_portfolio
+  ↓
+validate_and_size
+  ↓
+save_proposal
+  ↓
+request_approval
+  ↓
+await_approval
+  ↓
+recheck
+  ↓
+submit
+  ↓
+end
+```
+
+Only one AI node is needed:
+
+```text
+analyse_portfolio
+```
+
+Do not add:
+
+```text
+news agent
+fundamental agent
+risk agent
+critic agent
+TradingView agent
+Jev agent
+```
+
+unless a future measured limitation justifies them.
+
+The deterministic risk manager remains normal Python code.
+
+### Failure behavior
+
+If OpenAI is unavailable:
+
+```text
+option A: use deterministic fallback and mark proposal source=fallback
+option B: fail the analysis and create no proposal
+```
+
+Pick one behavior explicitly in configuration. Do not silently substitute one source for another.
+
+### Tests
+
+- successful OpenAI run;
+- malformed model output;
+- OpenAI timeout;
+- fallback behavior;
+- restart while awaiting approval;
+- no path from analyst directly to executor.
+
+**Done when:** a manual run produces a model-backed immutable proposal.
+
+---
+
+## Step 8 — Reuse deterministic policy, approval, and paper execution
+
+Map `PortfolioAdvice` into the existing recommendation and proposal path.
+
+The LLM chooses direction.
+
+Python chooses whether that recommendation is executable.
+
+Example:
+
+```text
+OpenAI: BUY VIST
+
+          ↓
+
+Python:
+- symbol allowed?
+- enough cash?
+- max position exceeded?
+- category cap exceeded?
+- max trades exceeded?
+- valid price?
+- data fresh enough?
+- quantity?
+```
+
+A model recommendation that fails policy/risk checks remains visible as **blocked**, not silently removed.
+
+Reuse:
+
+```text
+Recommendation
+RiskCheck
+Proposal
+Approval
+Order
+OrderExecutor
+PaperOrderExecutor
+TradingEvent
+```
+
+Approval continues to cover the entire proposal.
+
+Before submission:
+
+```text
+refresh portfolio
+refresh prices
+validate holdings
+validate cash
+validate material price change
+```
+
+Save the order before calling the executor.
+
+### Tests
+
+- BUY blocked by position cap;
+- BUY blocked by cash;
+- SELL cannot exceed owned quantity;
+- repeated approval cannot duplicate an order;
+- material price change blocks execution;
+- rejected proposal creates no order;
+- paper fill updates ledger.
+
+**Done when:** `analyze -> review -> approve -> paper execution -> history` works end to end.
+
+---
+
+## Step 9 — Add once-per-day scheduling
+
+Do not begin with an in-process scheduler.
+
+Add a CLI command such as:
+
+```bash
+python -m app.cli analyze --connection 1 --country argentina
+```
+
+Then run it from OS cron.
+
+The CLI must call the same application workflow as the web button.
+
+Idempotency rule:
+
+```text
+at most one scheduled proposal
+per connection
+per country
+per trading date
+```
+
+A daily scheduled run:
+
+```text
+refresh
+ -> analyze
+ -> save proposal
+ -> notify/log
+ -> wait for human approval
+```
+
+It must never approve its own proposal.
+
+If yesterday's proposal is still pending, define one explicit policy.
+
+Recommended MVP:
+
+```text
+expire previous pending proposal
+create today's proposal
+```
+
+### Tests
+
+- duplicate cron invocation;
+- pending previous proposal;
+- disabled connection;
+- failed IOL refresh;
+- OpenAI failure;
+- scheduled proposal waits for approval.
+
+**Done when:** cron can run twice accidentally without generating two daily proposals.
+
+---
+
+## Step 10 — Validate the daily paper product before live trading
+
+Run the system in daily paper mode long enough to evaluate:
+
+```text
+recommendation usefulness
+model consistency
+OpenAI failure rate
+token/API cost
+IOL call usage
+false BUY/SELL recommendations
+blocked recommendations
+stale-data frequency
+approval frequency
+paper portfolio results
+```
+
+Confirm the History page can reconstruct:
+
+```text
+analysis started
+data loaded
+OpenAI model used
+portfolio advice returned
+validation outcome
+proposal saved
+approval requested
+approved/rejected/expired
+fresh-data re-check
+order prepared
+paper fill/rejection
+ledger update
+```
+
+Live IOL execution is **not part of the ten-step MVP**.
+
+Only after daily paper trading is stable should a future implementation add `IOLOrderExecutor`.
+
+That later work must prove:
+
+```text
+order submission
+stable broker order ID
+status lookup
+partial fills
+rejection handling
+cancellation
+timeouts
+unknown outcomes
+reconciliation
+restart recovery
+idempotency
+live kill switch
+```
+
+**Done when:** the daily OpenAI-backed paper workflow is reliable, auditable, and useful enough to justify a separate live-trading phase.
+
+---
+
+# 10. Target LangGraph state
+
+Keep graph state small.
+
+Example:
+
+```python
+class TradingState(TypedDict):
+    user_id: int
+    connection_id: int
+    country: str
+
+    portfolio_snapshot_id: int | None
+    analysis_context: PortfolioAnalysisContext | None
+    advice: PortfolioAdvice | None
+
+    proposal_id: int | None
+    approval_id: int | None
+
+    warnings: list[str]
+    status: str
+```
+
+Do not put:
+
+```text
+IOL passwords
+IOL bearer tokens
+OpenAI API keys
+raw broker responses
+```
+
+into graph state.
+
+Persistent business state remains in PostgreSQL.
+
+---
+
+# 11. OpenAI prompt responsibility
+
+Keep the portfolio-analysis prompt versioned in one place:
+
+```text
+app/infrastructure/openai/prompts/portfolio_analysis.md
+```
+
+The prompt should tell the model:
+
+```text
+- analyze the portfolio as a whole;
+- review every existing holding;
+- consider allowed watchlist instruments for new BUY opportunities;
+- use only the supplied evidence;
+- do not assume unavailable fundamentals/news;
+- return structured BUY/HOLD/SELL decisions;
+- explain the main reason and risks;
+- do not calculate broker-specific order payloads;
+- do not override portfolio constraints;
+- do not claim execution.
+```
+
+The prompt version should be persisted in the proposal metadata, for example:
+
+```text
+analysis_version = "portfolio-v1"
+```
+
+This makes model-behavior changes auditable.
+
+---
+
+# 12. Testing strategy
+
+All automated tests must run without real IOL or OpenAI calls.
+
+Use:
+
+```text
+FakeIOL
+FakePortfolioAdvisor
+PaperOrderExecutor
+temporary/in-memory test persistence where supported
+```
+
+Minimum test groups:
+
+```text
+domain
+IOL mapping
+indicator calculations
+portfolio context
+OpenAI structured parsing
+model-output validation
+deterministic sizing
+risk checks
+proposal persistence
+approval
+idempotency
+fresh-data recheck
+paper execution
+LangGraph workflow
+browser flow
+daily CLI idempotency
+```
+
+Keep at least one full test:
+
+```text
+login
+ -> load fake IOL portfolio
+ -> run fake OpenAI analysis
+ -> review proposal
+ -> approve
+ -> paper execute
+ -> inspect History
+```
+
+---
+
+# 13. Configuration
+
+Secrets/environment:
+
+```text
+SECRET_KEY=
+CREDENTIAL_ENCRYPTION_KEY=
+
+DATABASE_URL=
+
+IOL_BASE_URL=
+IOL_MONTHLY_CALL_LIMIT=
+IOL_CALL_WARN_RATIO=
+
+OPENAI_API_KEY=
+OPENAI_MODEL=
+OPENAI_BASE_URL=
+OPENAI_TIMEOUT_SECONDS=
+
+LIVE_TRADING_ENABLED=false
+```
+
+Trading configuration:
+
+```text
+config/universe.toml
+```
+
+Do not put API keys or credentials in TOML.
+
+---
+
+# 14. MVP user flow
+
+The first complete version should allow the user to:
+
+1. Log in.
+2. Connect an IOL account.
+3. Refresh the current portfolio.
+4. Review current holdings and cash.
+5. Run a portfolio analysis manually.
+6. See OpenAI BUY / HOLD / SELL recommendations and rationale.
+7. See which recommendations were blocked by deterministic risk rules.
+8. Review the immutable proposal.
+9. Approve or reject it.
+10. Execute approved orders on the paper ledger.
+11. Review every step in History.
+12. Later enable one scheduled daily analysis through cron.
+
+---
+
+# 15. Explicitly out of scope
+
+For this version:
+
+```text
+intraday trading
+automatic approval
+automatic live trading
+high-frequency polling
+Jev
+TradingView
+autonomous web browsing
+multi-agent debate
+one-model-call-per-symbol
+LLM-generated order quantities
+LLM-generated broker payloads
+LLM access to IOL credentials
+live IOL order execution
+```
+
+These features should not be introduced while implementing Steps 0-10.
+
+---
+
+# 16. Final target
+
+The project should end this implementation phase with this architecture:
+
+```text
+                   ┌─────────────────┐
+                   │   Daily cron    │
+                   │   or Web UI     │
+                   └────────┬────────┘
+                            │
+                            ▼
+                   ┌─────────────────┐
+                   │    LangGraph    │
+                   └────────┬────────┘
+                            │
+              ┌─────────────▼─────────────┐
+              │     IOL Adapter           │
+              │ portfolio + market data   │
+              └─────────────┬─────────────┘
+                            │
+                            ▼
+              ┌───────────────────────────┐
+              │ PortfolioAnalysisContext  │
+              │ + Python indicators       │
+              └─────────────┬─────────────┘
+                            │
+                            ▼
+              ┌───────────────────────────┐
+              │ OpenAIPortfolioAdvisor    │
+              │ BUY / HOLD / SELL         │
+              └─────────────┬─────────────┘
+                            │
+                            ▼
+              ┌───────────────────────────┐
+              │ Deterministic policy      │
+              │ sizing + hard risk limits │
+              └─────────────┬─────────────┘
+                            │
+                            ▼
+              ┌───────────────────────────┐
+              │ Immutable Proposal        │
+              └─────────────┬─────────────┘
+                            │
+                            ▼
+                   ┌─────────────────┐
+                   │ Human approval  │
+                   └───────┬─────────┘
+                           │
+                    fresh re-check
+                           │
+                           ▼
+                   ┌─────────────────┐
+                   │ OrderExecutor   │
+                   └───────┬─────────┘
+                           │
+                           ▼
+                   ┌─────────────────┐
+                   │ Paper trading   │
+                   └─────────────────┘
+```
+
+That is the MVP.
+
+Keep the architecture extensible enough for future live IOL execution, but do not build future complexity before the daily, human-approved, OpenAI-backed paper workflow is working end to end.
