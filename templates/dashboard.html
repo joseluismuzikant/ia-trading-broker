@@ -2,15 +2,19 @@
 {% block title %}Dashboard &middot; ia-trading-broker{% endblock %}
 
 {% block content %}
-<h1>Dashboard</h1>
-<p class="muted">
-  Signed in as <strong>{{ user.username }}</strong>
-  {% if user.is_admin %}<span class="badge">admin</span>{% endif %}
-</p>
+<div class="page-head">
+  <h1>Dashboard</h1>
+  <p>
+    Signed in as <strong>{{ user.username }}</strong>
+    {% if user.is_admin %}<span class="badge">admin</span>{% endif %}
+  </p>
+</div>
 
 <p class="alert alert--info">
-  This dashboard is intentionally empty on Day&nbsp;1. Portfolio, broker
-  connection, and trading pages arrive in the following days.
+  Start with <a href="/connections">Connections</a> to add your IOL login, then
+  read your <a href="/portfolio">country portfolio</a> and run an
+  <a href="/analysis">analysis</a>. New here? Read the
+  <a href="/help">help and glossary</a> first.
 </p>
 
 <section class="grid">
@@ -25,7 +29,19 @@
 
   <article class="card card--muted">
     <h2>Portfolio</h2>
-    <p class="placeholder">No portfolio yet.</p>
+    <p class="muted">
+      Read positions, prices, and cash for one country, saved as a snapshot.
+    </p>
+    <p><a href="/portfolio">Open the country portfolio &rarr;</a></p>
+  </article>
+
+  <article class="card card--muted">
+    <h2>Analysis</h2>
+    <p class="muted">
+      Build a paper ledger, then run the indicators, strategy, and risk checks
+      to produce a proposal.
+    </p>
+    <p><a href="/analysis">Open analysis &rarr;</a></p>
   </article>
 
   <article class="card card--muted">
@@ -34,8 +50,12 @@
   </article>
 
   <article class="card card--muted">
-    <h2>Recent activity</h2>
-    <p class="placeholder">Nothing to show.</p>
+    <h2>Help</h2>
+    <p class="muted">
+      Plain-language guides to the paper ledger, EMA, RSI, MACD, and the rest of
+      the vocabulary.
+    </p>
+    <p><a href="/help">Help and glossary &rarr;</a></p>
   </article>
 </section>
 {% endblock %}

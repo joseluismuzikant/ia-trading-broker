@@ -3,20 +3,41 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="color-scheme" content="dark" />
+  <meta name="theme-color" content="#1a2129" />
   <title>{% block title %}{{ settings().app_name }}{% endblock %}</title>
   <link rel="stylesheet" href="/static/style.css" />
 </head>
 <body>
+  {% set path = request.url.path %}
+
+  <a class="skip-link" href="#main">Skip to content</a>
+
   <header class="site-header">
     <div class="site-header__inner">
-      <a class="brand" href="/">ia&#8209;trading&#8209;broker</a>
+      <a class="brand" href="/">
+        <span class="brand__mark" aria-hidden="true">ia</span>
+        <span>ia&#8209;trading&#8209;broker</span>
+      </a>
+
+      {% macro navlink(href, label, prefix="") %}
+        {% set active = path == href or (prefix and path.startswith(prefix)) %}
+        <a
+          class="nav__link{% if active %} nav__link--active{% endif %}"
+          href="{{ href }}"
+          {% if active %}aria-current="page"{% endif %}
+        >{{ label }}</a>
+      {% endmacro %}
+
       {% if user %}
-      <nav class="nav">
-        <a href="/dashboard">Dashboard</a>
-        <a href="/connections">Connections</a>
-        <a href="/profile">IOL profile</a>
-        <a href="/account-status">Account status</a>
-        <a href="/portfolio">Portfolio</a>
+      <nav class="nav" aria-label="Main">
+        {{ navlink('/dashboard', 'Dashboard') }}
+        {{ navlink('/connections', 'Connections', '/connections') }}
+        {{ navlink('/profile', 'IOL profile') }}
+        {{ navlink('/account-status', 'Account status') }}
+        {{ navlink('/portfolio', 'Portfolio', '/portfolio') }}
+        {{ navlink('/analysis', 'Analysis', '/analysis') }}
+        {{ navlink('/help', 'Help', '/help') }}
       </nav>
       <div class="account">
         <span class="account__user" title="Signed in">{{ user.username }}</span>
@@ -25,18 +46,27 @@
           <button type="submit" class="button button--ghost">Log out</button>
         </form>
       </div>
+      {% else %}
+      <nav class="nav" aria-label="Main">
+        {{ navlink('/help', 'Help', '/help') }}
+      </nav>
+      <div class="account">
+        <a class="button button--ghost" href="/login">Sign in</a>
+      </div>
       {% endif %}
     </div>
   </header>
 
-  <main class="content">
+  <main class="content" id="main">
     {% block content %}{% endblock %}
   </main>
 
   <footer class="site-footer">
-    <span>Day 3 &middot; v{{ app_version }}</span>
-    <span>environment: {{ settings().environment }}</span>
+    <span>Day 4 &middot; v{{ app_version }}</span>
+    <span class="site-footer__links">
+      <a href="/help">Help &amp; glossary</a>
+      <span>environment: {{ settings().environment }}</span>
+    </span>
   </footer>
 </body>
 </html>
-

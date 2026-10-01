@@ -2,7 +2,10 @@
 {% block title %}Account status &middot; ia-trading-broker{% endblock %}
 
 {% block content %}
-<h1>Account status</h1>
+<div class="page-head">
+  <h1>Account status</h1>
+  <p>Cash, balances, and holdings values from your IOL accounts.</p>
+</div>
 
 {% if not connection %}
 <p class="alert alert--info">
@@ -22,6 +25,7 @@
     </div>
 
     {% if account.cuentas %}
+    <div class="table-wrap">
     <table class="table">
       <thead>
         <tr>
@@ -52,6 +56,7 @@
         {% endfor %}
       </tbody>
     </table>
+    </div>
     {% else %}
     <p class="alert alert--info">The broker returned no accounts.</p>
     {% endif %}
@@ -59,6 +64,7 @@
     {% if account.estadisticas %}
     <div class="card">
       <h2>Statistics</h2>
+      <div class="table-wrap">
       <table class="table">
         <thead>
           <tr><th>Description</th><th class="num">Quantity</th><th class="num">Volume</th></tr>
@@ -73,6 +79,7 @@
           {% endfor %}
         </tbody>
       </table>
+      </div>
     </div>
     {% endif %}
   {% elif not snapshot %}

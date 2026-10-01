@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass, field
+from datetime import date, timedelta
 from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs
@@ -27,6 +28,30 @@ HISTORY_PATH_MARKER = "/Cotizacion/seriehistorica/"
 def load_fixture(name: str) -> Any:
     """Read one saved JSON fixture."""
     return json.loads((FIXTURE_DIR / name).read_text(encoding="utf-8"))
+
+
+def _zigzag_uptrend(count: int = 45, start: float = 100.0) -> list[dict]:
+    """A gently rising price series with small pullbacks.
+
+    It is long enough for the slow EMA (26) and the MACD signal line (9), and it
+    settles into a buy signal: the fast average is above the slow average,
+    momentum has turned positive, and RSI is below the overbought line.
+    """
+    history: list[dict] = []
+    day = date(2024, 1, 1)
+    for index in range(count):
+        close = start + index * 0.6 + (1.5 if index % 2 == 0 else -1.0)
+        history.append(
+            {
+                "ultimoPrecio": round(close, 2),
+                "apertura": round(close - 0.4, 2),
+                "maximo": round(close + 1.0, 2),
+                "minimo": round(close - 1.0, 2),
+                "volumenNominal": 100_000 + index * 500,
+                "fechaHora": (day + timedelta(days=index)).isoformat() + "T15:00:00",
+            }
+        )
+    return history
 
 
 @dataclass
@@ -50,12 +75,7 @@ class FakeIOL:
             "fechaHora": "2024-01-02T15:00:00",
         }
     )
-    price_history: list[dict] = field(
-        default_factory=lambda: [
-            {"ultimoPrecio": 60.555, "fechaHora": "2024-01-02T00:00:00"},
-            {"ultimoPrecio": 59.0, "fechaHora": "2023-12-29T00:00:00"},
-        ]
-    )
+    price_history: list[dict] = field(default_factory=_zigzag_uptrend)
 
     #: Force an error status for one endpoint instead of returning data.
     profile_error_status: int | None = None

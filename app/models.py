@@ -1,4 +1,4 @@
-"""ORM models for the application foundation."""
+"""ORM models for the application foundation and the paper-trading plan."""
 
 from __future__ import annotations
 
@@ -30,6 +30,21 @@ SNAPSHOT_PORTFOLIO = "portfolio"
 def portfolio_snapshot_kind(country: str) -> str:
     """Return the snapshot kind for one country portfolio."""
     return f"{SNAPSHOT_PORTFOLIO}:{country}"
+
+
+def price_history_kind(symbol: str) -> str:
+    """Return the snapshot kind for one instrument's saved price history."""
+    return f"price_history:{symbol.strip().upper()}"
+
+
+def ledger_snapshot_kind(country: str) -> str:
+    """Return the snapshot kind for one country's paper ledger."""
+    return f"paper_ledger:{country}"
+
+
+#: A proposal is the complete trade plan. It is inserted once and never updated,
+#: so the plan a user reviews cannot drift from the plan that was risk-checked.
+PROPOSAL_PENDING = "pending_review"
 
 
 def utcnow() -> datetime:
@@ -175,4 +190,42 @@ class Snapshot(Base):
         return (
             f"<Snapshot id={self.id} kind={self.kind!r} "
             f"connection_id={self.connection_id} stale={self.is_stale}>"
+        )
+
+
+class ProposalRecord(Base):
+    """A saved trade proposal.
+
+    The row is inserted once. Nothing in the application updates it: a later
+    analysis creates a new row, so an approval always points at exactly the plan
+    that was reviewed. The ``payload`` is the full proposal, including its
+    evidence, quantities, and risk results.
+    """
+
+    __tablename__ = "proposals"
+    __table_args__ = (
+        Index("ix_proposals_lookup", "connection_id", "country", "created_at"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), index=True
+    )
+    connection_id: Mapped[int] = mapped_column(
+        ForeignKey("broker_connections.id", ondelete="CASCADE"), index=True
+    )
+    country: Mapped[str] = mapped_column(String(32))
+    status: Mapped[str] = mapped_column(String(32), default=PROPOSAL_PENDING)
+    approval_mode: Mapped[str] = mapped_column(String(32), default="HUMAN_IN_THE_LOOP")
+    execution_mode: Mapped[str] = mapped_column(String(16), default="PAPER")
+    #: The complete proposal: recommendations, evidence, quantities, and risk.
+    payload: Mapped[dict] = mapped_column(JSON)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+    connection: Mapped[BrokerConnection] = relationship()
+
+    def __repr__(self) -> str:  # pragma: no cover - debug helper
+        return (
+            f"<ProposalRecord id={self.id} connection_id={self.connection_id} "
+            f"status={self.status!r}>"
         )

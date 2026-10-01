@@ -11,7 +11,7 @@ from fastapi.staticfiles import StaticFiles
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app import __version__
-from app.api import auth, broker, connections, dashboard, health
+from app.api import analysis, auth, broker, connections, dashboard, health, help
 from app.config import get_settings
 from app.db import dispose_engine, init_db
 from app.errors import CsrfError, RedirectToLogin
@@ -25,7 +25,9 @@ DESCRIPTION = (
     "Automatic trading application for InvertirOnline (IOL). "
     "Day 1 provides the project foundation, health checks, and login. "
     "Day 2 adds encrypted IOL connections, profile, and account status. "
-    "Day 3 adds the country portfolio and market-data reads."
+    "Day 3 adds the country portfolio and market-data reads. "
+    "Day 4 adds Python indicators, a paper ledger, and an immutable proposal. "
+    "A public help page explains the concepts and the terms."
 )
 
 
@@ -73,6 +75,8 @@ def create_app() -> FastAPI:
     app.include_router(dashboard.router)
     app.include_router(connections.router)
     app.include_router(broker.router)
+    app.include_router(analysis.router)
+    app.include_router(help.router)
 
     register_exception_handlers(app)
     return app

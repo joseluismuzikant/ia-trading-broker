@@ -384,13 +384,13 @@ IOL-specific details stay inside the IOL adapter. The rest of the application us
 - Broker order IDs
 - Order events
 
-The shared portfolio format lives in `app/domain/portfolio.py`. Instruments, positions, cash, and country portfolios are defined there, independent of any broker. Day 3 maps IOL responses into it inside the adapter, so pages and later strategies never depend on an IOL field name.
+The shared trading models live in `app/domain/trading.py` (paper ledger, indicator evidence, risk checks, recommendations, and proposals) and the exact money type in `app/domain/money.py`. The shared portfolio format lives in `app/domain/portfolio.py`. Instruments, positions, cash, and country portfolios are defined there, independent of any broker. Day 3 maps IOL responses into it inside the adapter, so pages and later strategies never depend on an IOL field name.
 
 The first version does not include IBKR. A future broker should use the same portfolio, market-data, and order interfaces without changing the strategy, risk, or approval logic.
 
 ## Repository status
 
-This README is the implementation plan. Day 1 (FastAPI, login, PostgreSQL, Docker Compose, and health checks), Day 2 (encrypted IOL connections, profile, and account status), and Day 3 (country portfolio and market-data reads, with IOL call budgeting) are implemented. See [day1/README.md](day1/README.md), [day2/README.md](day2/README.md), and [day3/README.md](day3/README.md) for setup and startup instructions. Later trading features are still planned; there is no live trading and no order placement.
+This README is the implementation plan. Day 1 (FastAPI, login, PostgreSQL, Docker Compose, and health checks), Day 2 (encrypted IOL connections, profile, and account status), Day 3 (country portfolio and market-data reads, with IOL call budgeting), and Day 4 (Python indicators, a paper ledger, a rule-based strategy, fixed risk checks, and an immutable proposal) are implemented. See [day1/README.md](day1/README.md), [day2/README.md](day2/README.md), [day3/README.md](day3/README.md), and [day4/README.md](day4/README.md) for setup and startup instructions. Later trading features are still planned; there is no live trading and no order placement.
 
 Planned structure:
 
@@ -463,6 +463,8 @@ Each day should finish with something that can be opened or tested. Do not start
 - Save a proposal that cannot be edited and show it on a review page. Do not place an order yet.
 
 **Done when:** a manual analysis creates a readable proposal with evidence, quantities, and risk results.
+
+Implemented. See [day4/README.md](day4/README.md). The proposal is saved and shown on the review page; approval and paper execution are Day 5.
 
 #### Day 5 — Human approval and paper execution
 
@@ -576,7 +578,7 @@ Each day should finish with something that can be opened or tested. Do not start
 
 ## Running the project
 
-See [day1/README.md](day1/README.md) for the Day 1 startup guide (Docker Compose, local Python setup, admin creation, health checks, and tests), [day2/README.md](day2/README.md) for the Day 2 guide (credential-encryption key, connecting an IOL account, reading the profile and account status, and one real read), and [day3/README.md](day3/README.md) for the Day 3 guide (country portfolio, quotes and price history, and the IOL monthly call budget). Database tables are created automatically when the app or CLI starts; no migration tool is used. Schema changes after Day 1 will require an explicit upgrade plan.
+See [day1/README.md](day1/README.md) for the Day 1 startup guide (Docker Compose, local Python setup, admin creation, health checks, and tests), [day2/README.md](day2/README.md) for the Day 2 guide (credential-encryption key, connecting an IOL account, reading the profile and account status, and one real read), [day3/README.md](day3/README.md) for the Day 3 guide (country portfolio, quotes and price history, and the IOL monthly call budget), and [day4/README.md](day4/README.md) for the Day 4 guide (indicators, the paper ledger, the strategy and risk limits, and the proposal review page). Database tables are created automatically when the app or CLI starts; no migration tool is used. Schema changes after Day 1 will require an explicit upgrade plan.
 
 Never commit real passwords or tokens. Copy `.env.example` to the ignored `.env` file and replace its placeholders.
 

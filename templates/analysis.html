@@ -1,0 +1,253 @@
+{% extends "base.html" %}
+{% block title %}Analysis &middot; ia-trading-broker{% endblock %}
+
+{% macro money(value) %}{{ value if value is not none else "—" }}{% endmacro %}
+{% macro number(value, places=2) %}{{ ("%." ~ places ~ "f") | format(value) if value is not none else "—" }}{% endmacro %}
+{% macro percent(value, places=2) %}{{ ("%." ~ places ~ "f") | format(value * 100) ~ "%" if value is not none else "—" }}{% endmacro %}
+
+{% block content %}
+<div class="page-head">
+  <h1>Analysis</h1>
+  <p>
+    Indicators, the rule-based strategy, fixed sizing, and risk checks build a
+    proposal. It is saved and shown here.
+    <strong>No order is placed.</strong>
+    <a href="/help">What do these words mean?</a>
+  </p>
+</div>
+
+{% if not connection %}
+<p class="alert alert--info">
+  No broker connection yet. <a href="/connections/new">Add one</a> before
+  running an analysis.
+</p>
+{% else %}
+
+<section class="card card--tight">
+  <div class="toolbar">
+    <div>
+      <span class="muted">Connection:</span>
+      <strong>{{ connection.label }}</strong>
+      <span class="muted">({{ connection.username }} &middot; {{ connection.broker }})</span>
+    </div>
+    <div class="actions" style="margin: 0;">
+      <form method="post" action="/analysis/ledger" class="inline-form">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+        <input type="hidden" name="connection_id" value="{{ connection.id }}" />
+        <input type="hidden" name="country" value="{{ country }}" />
+        <button type="submit" class="button button--ghost">Create paper ledger</button>
+      </form>
+      <form method="post" action="/analysis/run" class="inline-form">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+        <input type="hidden" name="connection_id" value="{{ connection.id }}" />
+        <input type="hidden" name="country" value="{{ country }}" />
+        <button type="submit" class="button">Run analysis</button>
+      </form>
+    </div>
+  </div>
+
+  <form method="get" action="/analysis" class="toolbar toolbar--sub">
+    <input type="hidden" name="connection_id" value="{{ connection.id }}" />
+    <label class="field__label" for="country">Country</label>
+    <select class="field__input" id="country" name="country">
+      {% for value in countries %}
+      <option value="{{ value }}" {% if value == country %}selected{% endif %}>
+        {{ value.replace("_", " ") | title }}
+      </option>
+      {% endfor %}
+    </select>
+    <button type="submit" class="button button--ghost">Show</button>
+  </form>
+
+  {% if iol_usage %}
+  <p class="snapshot-meta">
+    IOL API calls this month: <strong>{{ iol_usage.used }}</strong>{% if iol_usage.limit %}
+    of {{ iol_usage.limit }}{% endif %}
+    <span class="muted">({{ iol_usage.period }}, counted since this process started)</span>
+  </p>
+  {% endif %}
+</section>
+
+{% if ledger_status == "ok" %}
+<p class="alert alert--ok">Paper ledger created from the latest portfolio snapshot.</p>
+{% elif ledger_status == "error" %}
+<p class="alert alert--error">Could not create the paper ledger. {{ message }}</p>
+{% endif %}
+
+{% if analysis_status == "ok" %}
+<p class="alert alert--ok">Analysis complete. A new proposal was saved.</p>
+{% elif analysis_status == "error" %}
+<p class="alert alert--error">The analysis did not run. {{ message }}</p>
+{% endif %}
+
+<h2>Paper ledger</h2>
+{% if not ledger %}
+<p class="alert alert--info">
+  No paper ledger yet. Create one from the portfolio, then run an analysis.
+</p>
+{% else %}
+<section class="grid grid--stats">
+  <article class="stat">
+    <span class="stat__label">Paper cash</span>
+    <span class="stat__value">{{ money(ledger.cash) }} <span class="muted">{{ ledger.currency or "" }}</span></span>
+  </article>
+  <article class="stat">
+    <span class="stat__label">Positions value</span>
+    <span class="stat__value">{{ money(ledger.positions_value) }}</span>
+  </article>
+  <article class="stat">
+    <span class="stat__label">Total</span>
+    <span class="stat__value">{{ money(ledger.total_value) }}</span>
+  </article>
+</section>
+
+{% if ledger.positions %}
+<div class="table-wrap">
+<table class="table">
+  <thead>
+    <tr>
+      <th>Symbol</th>
+      <th>Market</th>
+      <th class="num">Quantity</th>
+      <th class="num">Average price</th>
+      <th class="num">Last price</th>
+      <th class="num">Value</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for position in ledger.positions %}
+    <tr>
+      <td>{{ position.symbol }}</td>
+      <td>{{ position.market or "—" }}</td>
+      <td class="num">{{ position.quantity }}</td>
+      <td class="num">{{ money(position.average_price) }}</td>
+      <td class="num">{{ money(position.last_price) }}</td>
+      <td class="num">{{ money(position.market_value) }}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+</div>
+{% else %}
+<p class="alert alert--info">The ledger has no positions.</p>
+{% endif %}
+{% endif %}
+
+<h2>Proposal</h2>
+{% if not proposal %}
+<p class="alert alert--info">No proposal saved yet. Run an analysis to create one.</p>
+{% else %}
+<section class="card">
+  <div class="toolbar">
+    <p class="total" style="font-size: 1.1rem;">{{ proposal.summary }}</p>
+    <span class="badge {{ 'badge--ok' if proposal.passed_risk else 'badge--warn' }}">
+      {{ proposal.status }}
+    </span>
+  </div>
+
+  <dl class="kv">
+    <dt>Approval mode</dt><dd>{{ proposal.approval_mode }}</dd>
+    <dt>Execution mode</dt><dd>{{ proposal.execution_mode }}</dd>
+    <dt>Portfolio value</dt><dd>{{ money(proposal.portfolio_value) }} {{ proposal.currency or "" }}</dd>
+    <dt>Cash</dt><dd>{{ money(proposal.cash) }}</dd>
+    <dt>Turnover</dt><dd>{{ percent(proposal.turnover) }}</dd>
+    <dt>Created</dt><dd>{{ proposal.created_at.strftime("%Y-%m-%d %H:%M:%S UTC") if proposal.created_at else "—" }}</dd>
+  </dl>
+
+  <h3>Plan risk checks</h3>
+  <ul class="checks">
+    {% for check in proposal.risk_checks %}
+    <li class="{{ 'check--ok' if check.passed else 'check--fail' }}">
+      <strong>{{ "PASS" if check.passed else "FAIL" }}</strong>
+      <span class="muted">{{ check.name }}</span> — {{ check.detail }}
+    </li>
+    {% endfor %}
+  </ul>
+</section>
+
+<div class="table-wrap">
+<table class="table">
+  <thead>
+    <tr>
+      <th>Symbol</th>
+      <th>Action</th>
+      <th class="num">Quantity</th>
+      <th class="num">Limit</th>
+      <th class="num">Notional</th>
+      <th class="num">Weight</th>
+      <th>Reason</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for item in proposal.recommendations %}
+    <tr>
+      <td>{{ item.symbol }}</td>
+      <td>
+        {{ item.action }}
+        {% if item.action != "HOLD" and not item.passed_risk %}
+          <span class="badge badge--danger">blocked</span>
+        {% endif %}
+      </td>
+      <td class="num">{{ item.quantity }}</td>
+      <td class="num">{{ money(item.limit_price) }}</td>
+      <td class="num">{{ money(item.notional) }}</td>
+      <td class="num">{{ percent(item.weight_after) }}</td>
+      <td>{{ item.rationale }}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+</div>
+
+{% for item in proposal.recommendations %}
+<details class="card card--muted">
+  <summary><strong>{{ item.symbol }}</strong> — {{ item.action }}, evidence and risk checks</summary>
+  <dl class="kv">
+    <dt>Last price</dt><dd>{{ money(item.evidence.last_price) }}</dd>
+    <dt>EMA fast / slow</dt><dd>{{ number(item.evidence.ema_fast) }} / {{ number(item.evidence.ema_slow) }}</dd>
+    <dt>RSI</dt><dd>{{ number(item.evidence.rsi) }}</dd>
+    <dt>MACD / signal / histogram</dt>
+    <dd>{{ number(item.evidence.macd, 4) }} / {{ number(item.evidence.macd_signal, 4) }} / {{ number(item.evidence.macd_histogram, 4) }}</dd>
+    <dt>ATR</dt><dd>{{ number(item.evidence.atr) }}</dd>
+    <dt>Average volume</dt><dd>{{ number(item.evidence.average_volume, 0) }}</dd>
+    <dt>Return</dt><dd>{{ percent(item.evidence.return_fraction) }}</dd>
+    <dt>Observations</dt><dd>{{ item.evidence.observations }}</dd>
+  </dl>
+  <ul class="checks">
+    {% for check in item.risk_checks %}
+    <li class="{{ 'check--ok' if check.passed else 'check--fail' }}">
+      <strong>{{ "PASS" if check.passed else "FAIL" }}</strong>
+      <span class="muted">{{ check.name }}</span> — {{ check.detail }}
+    </li>
+    {% endfor %}
+  </ul>
+</details>
+{% endfor %}
+
+{% if proposals %}
+<h3>Recent proposals</h3>
+<div class="table-wrap">
+<table class="table">
+  <thead>
+    <tr><th>Id</th><th>Created</th><th>Status</th><th class="num">Turnover</th><th></th></tr>
+  </thead>
+  <tbody>
+    {% for record in proposals %}
+    <tr>
+      <td>{{ record.id }}</td>
+      <td>{{ record.created_at.strftime("%Y-%m-%d %H:%M:%S UTC") }}</td>
+      <td>{{ record.status }}</td>
+      <td class="num">{{ percent(record.payload.turnover) }}</td>
+      <td>
+        <a href="/analysis?connection_id={{ connection.id }}&country={{ country }}&proposal_id={{ record.id }}">View</a>
+      </td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+</div>
+{% endif %}
+{% endif %}
+
+{% endif %}
+{% endblock %}
