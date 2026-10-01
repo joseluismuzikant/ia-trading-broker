@@ -13,6 +13,7 @@ from app.services import analysis as analysis_service
 from app.services import broker as broker_service
 from app.services import connections as connections_service
 from app.services import ledger as ledger_service
+from tests.day5_helpers import finalist_for, single_symbol_universe
 
 
 def uptrend_quotes(count: int = 45, start: float = 100.0) -> list[Quote]:
@@ -82,10 +83,12 @@ def test_an_empty_history_is_handled() -> None:
 # --- Building a proposal --------------------------------------------------
 
 
-def test_a_proposal_sizes_a_buy_for_an_allowed_instrument() -> None:
+def test_a_proposal_sizes_a_buy_for_a_finalist() -> None:
     proposal = analysis_service.build_proposal(
         ledger=flat_ledger(),
-        history={"GGAL": uptrend_quotes()},
+        evidence={"GGAL": analysis_service.evidence_for(uptrend_quotes())},
+        finalists=[finalist_for("GGAL")],
+        universe=single_symbol_universe(),
     )
     assert proposal.country == "argentina"
     assert proposal.cash == money("100000.00")
@@ -102,7 +105,12 @@ def test_a_proposal_sizes_a_buy_for_an_allowed_instrument() -> None:
 
 
 def test_a_proposal_holds_when_there_is_no_history() -> None:
-    proposal = analysis_service.build_proposal(ledger=flat_ledger(), history={})
+    proposal = analysis_service.build_proposal(
+        ledger=flat_ledger(),
+        evidence={},
+        finalists=[],
+        universe=single_symbol_universe(),
+    )
     assert proposal.recommendations == []
     assert proposal.orders == []
     assert "No trade" in proposal.summary
@@ -123,7 +131,12 @@ def test_an_unpriced_holding_is_held_not_traded() -> None:
             )
         ],
     )
-    proposal = analysis_service.build_proposal(ledger=book, history={"GGAL": []})
+    proposal = analysis_service.build_proposal(
+        ledger=book,
+        evidence={},
+        finalists=[],
+        universe=single_symbol_universe(),
+    )
     assert proposal.recommendations[0].action == "HOLD"
 
 
@@ -157,6 +170,27 @@ async def _prepare(db, user, connection):
             market="BCBA",
             symbol=symbol,
         )
+
+
+async def test_a_history_read_normalises_a_lowercase_market(
+    db_session, make_user, fake_iol
+) -> None:
+    user = await make_user("alice")
+    connection = await _connection(db_session, user, fake_iol)
+
+    # The market copied from a portfolio payload is lowercased, but IOL's quote
+    # path needs the documented uppercase code.
+    result = await broker_service.read_price_history(
+        db_session,
+        user_id=user.id,
+        connection=connection,
+        market="bcba",
+        symbol="GGAL",
+    )
+
+    assert result.ok is True
+    assert result.snapshot is not None
+    assert result.snapshot.payload["quotes"]
 
 
 async def test_running_an_analysis_needs_a_ledger(db_session, make_user, fake_iol) -> None:

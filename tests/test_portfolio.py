@@ -95,6 +95,43 @@ async def test_get_price_history_returns_a_list() -> None:
     assert "seriehistorica" in fake.authenticated_paths[0]
 
 
+async def test_price_history_normalises_a_lowercase_market() -> None:
+    fake = FakeIOL()
+
+    async with build_client(fake) as client:
+        token = await client.fetch_token(username=USERNAME, password=PASSWORD)
+        await client.get_price_history(
+            token.access_token,
+            market="bcba",
+            symbol="GGAL",
+            date_from="2024-01-01",
+            date_to="2024-01-31",
+        )
+
+    # IOL reports the portfolio market lowercased, but the quote path needs the
+    # documented uppercase code. The fake 404s on anything else, like IOL does.
+    path = fake.authenticated_paths[0]
+    assert path.startswith("/api/v2/BCBA/Titulos/GGAL/Cotizacion/seriehistorica/")
+    assert path.endswith("/SinAjustar")
+
+
+async def test_price_history_sends_the_word_for_adjusted() -> None:
+    fake = FakeIOL()
+
+    async with build_client(fake) as client:
+        token = await client.fetch_token(username=USERNAME, password=PASSWORD)
+        await client.get_price_history(
+            token.access_token,
+            market="BCBA",
+            symbol="GGAL",
+            date_from="2024-01-01",
+            date_to="2024-01-31",
+            adjusted=True,
+        )
+
+    assert fake.authenticated_paths[0].endswith("/Ajustada")
+
+
 async def test_an_unknown_instrument_raises_not_found() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         if request.url.path == "/token":

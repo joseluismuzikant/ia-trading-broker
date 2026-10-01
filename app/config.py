@@ -61,6 +61,11 @@ class Settings(BaseSettings):
     #: Fraction of the limit at which a single warning is logged.
     iol_call_warn_ratio: float = Field(default=0.8, gt=0, le=1)
 
+    # --- Trading universe ------------------------------------------------
+    #: Where the universe and portfolio limits are declared. Empty means the
+    #: file shipped with the application (``config/universe.toml``).
+    universe_config_path: str = ""
+
     # --- Trading safety switches (both stay off until proven safe) --------
     live_trading_enabled: bool = False
     automatic_live_trading_enabled: bool = False

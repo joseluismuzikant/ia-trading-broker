@@ -7,6 +7,8 @@ stores a new proposal. Nothing here places an order.
 
 from __future__ import annotations
 
+from urllib.parse import quote
+
 from fastapi import APIRouter, Depends, Form, Request, status
 from fastapi.responses import HTMLResponse, RedirectResponse
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -17,15 +19,14 @@ from app.deps import AuthContext, require_user, validate_csrf_pair
 from app.domain.trading import Proposal
 from app.infrastructure.iol import call_budget
 from app.services import analysis as analysis_service
-from app.services import broker as broker_service
+from app.services import approvals as approvals_service
 from app.services import connections as connections_service
 from app.services import ledger as ledger_service
+from app.services import orders as orders_service
 from app.templating import templates
+from app.workflows import trading_flow
 
 router = APIRouter(tags=["analysis"])
-
-#: Market used when a symbol's market is unknown. BCBA is the local exchange.
-DEFAULT_MARKET = "BCBA"
 
 
 async def _render(
@@ -46,7 +47,10 @@ async def _render(
     selected = country
     ledger = None
     proposal = None
+    proposal_record = None
     proposals: list = []
+    approval = None
+    orders: list = []
 
     if connection is not None:
         selected = _resolve_country(country, connection)
@@ -55,13 +59,10 @@ async def _render(
         )
 
         if proposal_id is not None:
-            record = await analysis_service.get_proposal(
+            proposal_record = await analysis_service.get_proposal(
                 db, user_id=auth.user.id, proposal_id=proposal_id
             )
-            if record is not None:
-                proposal = Proposal.model_validate(record.payload)
-                proposal = proposal.model_copy(update={"status": record.status})
-        if proposal is None:
+        if proposal_record is None:
             records = await analysis_service.list_proposals(
                 db,
                 user_id=auth.user.id,
@@ -69,9 +70,16 @@ async def _render(
                 country=selected,
             )
             proposals = records[:5]
-            if records:
-                proposal = Proposal.model_validate(records[0].payload)
-                proposal = proposal.model_copy(update={"status": records[0].status})
+            proposal_record = records[0] if records else None
+        if proposal_record is not None:
+            proposal = Proposal.model_validate(proposal_record.payload)
+            proposal = proposal.model_copy(update={"status": proposal_record.status})
+            approval = await approvals_service.latest_approval(
+                db, user_id=auth.user.id, proposal_id=proposal_record.id
+            )
+            orders = await orders_service.list_orders_for_proposal(
+                db, user_id=auth.user.id, proposal_id=proposal_record.id
+            )
 
     return templates.TemplateResponse(
         request,
@@ -84,11 +92,16 @@ async def _render(
             "country": selected,
             "countries": connections_service.SUPPORTED_COUNTRIES,
             "ledger": ledger,
+            "universe": analysis_service.load_config(),
             "proposal": proposal,
+            "proposal_record": proposal_record,
             "proposals": proposals,
+            "approval": approval,
+            "orders": orders,
             "ledger_status": request.query_params.get("ledger"),
             "analysis_status": request.query_params.get("analysis"),
             "message": request.query_params.get("message"),
+            "history_message": request.query_params.get("history"),
             "iol_usage": call_budget.usage,
         },
     )
@@ -175,43 +188,54 @@ async def run_analysis(
             status_code=status.HTTP_303_SEE_OTHER,
         )
 
-    # Refresh price history for every symbol the analysis will judge. A failed
-    # read is not fatal: the symbol is judged on whatever history is saved.
-    symbols = {position.symbol for position in ledger.positions}
-    symbols |= analysis_service.DEFAULT_ALLOWLIST
-    for symbol in sorted(symbols):
-        market = _market_for(symbol, ledger)
-        try:
-            await broker_service.read_price_history(
-                db,
-                user_id=auth.user.id,
-                connection=connection,
-                market=market,
-                symbol=symbol,
-            )
-        except Exception:  # noqa: BLE001 - a bad market must not stop the run
-            continue
+    # The funnel needs a price history for every configured instrument and for
+    # everything the ledger holds. A failed read is not fatal: the symbol is
+    # judged on whatever history is saved, and the failure is reported rather
+    # than disguised as "not enough history".
+    universe = analysis_service.load_config()
+    failed = await analysis_service.refresh_history(
+        db,
+        user_id=auth.user.id,
+        connection=connection,
+        universe=universe,
+        ledger=ledger,
+    )
 
-    try:
-        record = await analysis_service.run_analysis(
-            db, user_id=auth.user.id, connection=connection, country=selected
-        )
-    except analysis_service.AnalysisError as exc:
-        await db.rollback()
+    history_message = _run_note(failed, universe=universe)
+    # Build the proposal through the workflow, which then pauses for the human
+    # approval when the plan holds at least one order.
+    state = await trading_flow.start_run(
+        db, user_id=auth.user.id, connection=connection, country=selected
+    )
+
+    proposal_id = state.get("proposal_id")
+    if proposal_id:
+        suffix = f"&history={quote(history_message)}" if history_message else ""
         return RedirectResponse(
-            f"{base}&analysis=error&message={str(exc)}",
+            f"{base}&analysis=ok&proposal_id={proposal_id}{suffix}",
             status_code=status.HTTP_303_SEE_OTHER,
         )
-
+    message = state.get("message") or "The analysis did not run."
     return RedirectResponse(
-        f"{base}&analysis=ok&proposal_id={record.id}",
+        f"{base}&analysis=error&message={message}",
         status_code=status.HTTP_303_SEE_OTHER,
     )
 
 
-def _market_for(symbol: str, ledger) -> str:
-    """The market to query for a symbol: the ledger's, or the local default."""
-    position = ledger.position_for(symbol)
-    if position is not None and position.market:
-        return position.market
-    return DEFAULT_MARKET
+def _run_note(failed: list[tuple[str, str]], *, universe) -> str:
+    """One message naming everything the run could not read, or "" when it could."""
+    parts: list[str] = []
+    if not universe.instruments:
+        parts.append(
+            "The configured universe holds no instruments, so no new position "
+            "was proposed."
+        )
+    if failed:
+        described = ", ".join(f"{symbol} ({reason})" for symbol, reason in failed)
+        parts.append(
+            "Could not refresh the price history for "
+            + described
+            + ". Those symbols are judged on saved data and may show as not "
+            "enough history."
+        )
+    return " ".join(parts)

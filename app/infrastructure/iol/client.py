@@ -44,6 +44,11 @@ FALLBACK_TTL_SECONDS = 300
 #: are repeated this way; a write is never retried automatically.
 SAFE_READ_RETRIES = 2
 
+#: The ``ajustada`` path segment. IOL expects the words ``Ajustada`` or
+#: ``SinAjustar``, not the booleans the parameter name suggests.
+ADJUSTED = "Ajustada"
+UNADJUSTED = "SinAjustar"
+
 
 class IOLClient:
     """A thin, credential-aware wrapper around the IOL REST API."""
@@ -140,7 +145,7 @@ class IOLClient:
         adjusted: bool = False,
     ) -> list[Quote]:
         """Read the historical quotes for one instrument between two dates."""
-        flag = "true" if adjusted else "false"
+        flag = ADJUSTED if adjusted else UNADJUSTED
         path = (
             f"{_quote_path(market, symbol)}/seriehistorica/"
             f"{quote(date_from, safe='')}/{quote(date_to, safe='')}/{flag}"
@@ -290,8 +295,17 @@ def _transport_message(exc: httpx.HTTPError) -> str:
 
 
 def _quote_path(market: str, symbol: str) -> str:
-    """Build the quote path with the market and symbol percent-encoded."""
-    return f"/api/v2/{quote(market, safe='')}/Titulos/{quote(symbol, safe='')}/Cotizacion"
+    """Build the quote path with the market and symbol percent-encoded.
+
+    IOL market codes are uppercase (``BCBA``, ``NYSE``, ``NASDAQ``, ``AMEX``,
+    ``BCS``, ``ROFX``). The portfolio payload reports them lowercased, so the
+    code is upper cased here rather than at every call site.
+    """
+    clean_market = market.strip().upper()
+    return (
+        f"/api/v2/{quote(clean_market, safe='')}"
+        f"/Titulos/{quote(symbol, safe='')}/Cotizacion"
+    )
 
 
 def build_client() -> IOLClient:

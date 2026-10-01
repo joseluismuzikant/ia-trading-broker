@@ -342,7 +342,9 @@ async def read_price_history(
     overwrites another's. The payload holds the list of quotes and nothing else.
     """
     clean_symbol = symbol.strip().upper()
-    clean_market = market.strip()
+    # IOL market codes are uppercase; the portfolio payload reports them
+    # lowercased, so the code is normalised here as well as in the client.
+    clean_market = market.strip().upper()
     if not clean_symbol or not clean_market:
         raise IOLUnavailableError("a market and a symbol are required")
 

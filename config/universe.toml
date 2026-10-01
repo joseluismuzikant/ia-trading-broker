@@ -1,0 +1,77 @@
+# The trading universe and the portfolio limits.
+#
+# This file is the single source of truth for which instruments the project
+# considers. Nothing in the code names a symbol: edit here to change the
+# universe. Each entry maps the ticker to its paper name, which is what the
+# analysis pages show.
+#
+#   SYMBOL = "Paper name"
+#
+# Every category may declare the market its symbols are quoted on; the value
+# defaults to BCBA when it is left out.
+
+[universe.argentina_stocks]
+market = "BCBA"
+
+[universe.argentina_stocks.instruments]
+YPFD = "YPF S.A."
+VIST = "Vista Energy S.A."
+PAMP = "Pampa Energía S.A."
+CEPU = "Central Puerto S.A."
+TGSU2 = "Transportadora de Gas del Sur S.A."
+TGNO4 = "Transportadora de Gas del Norte S.A."
+EDN = "Edenor S.A."
+TRAN = "Transener S.A."
+GGAL = "Grupo Financiero Galicia S.A."
+BMA = "Banco Macro S.A."
+BBAR = "BBVA Argentina S.A."
+SUPV = "Grupo Supervielle S.A."
+BYMA = "BYMA S.A."
+TXAR = "Ternium Argentina S.A."
+ALUA = "Aluar Aluminio Argentino S.A.I.C."
+LOMA = "Loma Negra C.I.A.S.A."
+CRES = "Cresud S.A.C.I.F. y A."
+COME = "Sociedad Comercial del Plata S.A."
+MIRG = "Mirgor S.A.C.I.F.I.A."
+METR = "Metrogas S.A."
+
+[universe.cedears]
+market = "BCBA"
+
+[universe.cedears.instruments]
+SPY = "SPDR S&P 500 ETF Trust"
+QQQ = "Invesco QQQ Trust"
+AAPL = "Apple Inc."
+MSFT = "Microsoft Corporation"
+GOOGL = "Alphabet Inc. Class A"
+AMZN = "Amazon.com, Inc."
+NVDA = "NVIDIA Corporation"
+META = "Meta Platforms, Inc."
+TSLA = "Tesla, Inc."
+MELI = "MercadoLibre, Inc."
+
+[universe.bonds]
+market = "BCBA"
+
+[universe.bonds.instruments]
+AL30 = "Bonar 2030"
+GD30 = "Global 2030"
+AL35 = "Bonar 2035"
+GD35 = "Global 2035"
+
+# Hard portfolio limits. The risk manager refuses any order that would break
+# one of them, and the review page shows which limit stopped an order.
+[portfolio_constraints]
+max_open_positions = 8
+max_argentina_stock_positions = 4
+max_cedear_positions = 3
+max_bond_positions = 2
+max_single_position_pct = 0.15
+min_cash_pct = 0.10
+max_trades_per_run = 3
+
+# Width of the analysis funnel: how many instruments each stage may keep.
+[selection]
+candidates_min = 10
+candidates_max = 12
+finalists = 5

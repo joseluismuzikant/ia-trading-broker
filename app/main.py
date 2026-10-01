@@ -11,7 +11,17 @@ from fastapi.staticfiles import StaticFiles
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app import __version__
-from app.api import analysis, auth, broker, connections, dashboard, health, help
+from app.api import (
+    analysis,
+    auth,
+    broker,
+    connections,
+    dashboard,
+    health,
+    help,
+    history,
+    proposals,
+)
 from app.config import get_settings
 from app.db import dispose_engine, init_db
 from app.errors import CsrfError, RedirectToLogin
@@ -27,6 +37,8 @@ DESCRIPTION = (
     "Day 2 adds encrypted IOL connections, profile, and account status. "
     "Day 3 adds the country portfolio and market-data reads. "
     "Day 4 adds Python indicators, a paper ledger, and an immutable proposal. "
+    "Day 5 adds a LangGraph workflow, human approval for a saved proposal, "
+    "paper execution, and a trading history page. "
     "A public help page explains the concepts and the terms."
 )
 
@@ -76,6 +88,8 @@ def create_app() -> FastAPI:
     app.include_router(connections.router)
     app.include_router(broker.router)
     app.include_router(analysis.router)
+    app.include_router(proposals.router)
+    app.include_router(history.router)
     app.include_router(help.router)
 
     register_exception_handlers(app)

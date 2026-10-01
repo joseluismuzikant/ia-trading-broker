@@ -283,3 +283,4 @@ async def test_an_unsupported_broker_is_refused(db_session, make_user, fake_iol)
 
     assert result.ok is False
     assert fake_iol.token_grants == []
+
