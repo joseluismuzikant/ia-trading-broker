@@ -1,0 +1,429 @@
+{% extends "base.html" %}
+{% block title %}Help and glossary &middot; ia-trading-broker{% endblock %}
+
+{% block content %}
+<div class="page-head">
+  <h1>Help and glossary</h1>
+  <p>
+    What this application does, how a run turns market data into a proposal, and
+    plain-language definitions of the words on the other pages.
+  </p>
+</div>
+
+<p class="callout callout--info">
+  <strong>Paper trading only.</strong> The application reads your real IOL data,
+  but every decision it makes is written to a local, simulated portfolio. It
+  never places a real order. Live trading is off by default and is not part of
+  the current build.
+</p>
+
+<section class="prose">
+  <nav aria-label="On this page">
+    <h2 id="contents">On this page</h2>
+    <ul class="toc">
+      <li><a href="#what">What this is</a></li>
+      <li><a href="#how">How a run works</a></li>
+      <li><a href="#data">Snapshots and freshness</a></li>
+      <li><a href="#layers">How the code is organised</a></li>
+      <li><a href="#ledger">The paper ledger</a></li>
+      <li><a href="#indicators">Indicators</a></li>
+      <li><a href="#strategy">The strategy</a></li>
+      <li><a href="#risk">Sizing and risk checks</a></li>
+      <li><a href="#proposal">The proposal</a></li>
+      <li><a href="#budget">The IOL call budget</a></li>
+      <li><a href="#glossary">Glossary</a></li>
+    </ul>
+  </nav>
+
+  <h2 id="what">What this is</h2>
+  <p>
+    <strong>ia-trading-broker</strong> connects to an InvertirOnline (IOL)
+    brokerage account and, on demand, reads the account, builds a simulated
+    portfolio from it, calculates a few technical indicators, applies a fixed
+    rule-based strategy, sizes the resulting orders, checks them against fixed
+    risk limits, and saves the result as a <em>proposal</em> you can review.
+  </p>
+  <p>
+    It is deliberately conservative. The decision logic is plain Python with
+    tests, not a model. Nothing is automatic yet: you press a button, the
+    analysis runs, and you read the result. No order is ever sent to the broker.
+  </p>
+
+  <h2 id="how">How a run works</h2>
+  <ol class="steps">
+    <li>
+      <strong>Read the broker.</strong> A saved connection logs in to IOL and
+      fetches the profile, account status, and country portfolio. Each response
+      is stored as a timestamped <em>snapshot</em>.
+    </li>
+    <li>
+      <strong>Build the paper ledger.</strong> The portfolio snapshot is copied
+      into a simulated account holding fake cash and fake positions. Creating it
+      costs no broker calls.
+    </li>
+    <li>
+      <strong>Refresh price history.</strong> For every symbol the analysis will
+      judge, recent daily prices are read and saved. These are read-only calls.
+    </li>
+    <li>
+      <strong>Calculate indicators.</strong> EMA, RSI, MACD, ATR, average
+      volume, and the return are computed in Python from that history.
+    </li>
+    <li>
+      <strong>Decide.</strong> The strategy turns those numbers into a
+      buy, sell, or hold for each symbol. A missing indicator always means hold.
+    </li>
+    <li>
+      <strong>Size and check.</strong> An order quantity is chosen within the
+      limits, and every risk check must pass. A failed check zeroes the quantity
+      and is kept visible.
+    </li>
+    <li>
+      <strong>Save the proposal.</strong> The full plan is stored once, with its
+      evidence, quantities, and risk results. It is shown on the Analysis page.
+      Nothing is sent to the broker.
+    </li>
+  </ol>
+  <p class="muted">
+    A later day adds an approval step and paper execution, where an approved
+    proposal would be applied to the paper ledger. Until then, the proposal is
+    the end of the line.
+  </p>
+
+  <h2 id="data">Snapshots and freshness</h2>
+  <p>
+    Every broker response is saved as a <em>snapshot</em>: one row per
+    connection and per kind of data (profile, account status, portfolio for a
+    country, price history for a symbol). Pages always render the newest saved
+    snapshot, so they load instantly and never wait on the network.
+  </p>
+  <p>
+    When you press <strong>Refresh from IOL</strong> and the broker fails, the
+    last good snapshot is <em>kept</em> and marked <span class="badge badge--warn">stale</span>.
+    Known data is never deleted. That is why you can still read the last
+    portfolio even when IOL is down.
+  </p>
+
+  <h2 id="layers">How the code is organised</h2>
+  <p>The application is split into layers so a change stays in one place:</p>
+  <ul>
+    <li>
+      <strong>Pages</strong> (<code>app/api</code>) handle the web requests and
+      render templates.
+    </li>
+    <li>
+      <strong>Services</strong> (<code>app/services</code>) orchestrate: they
+      fetch, save snapshots, build the ledger, and run an analysis.
+    </li>
+    <li>
+      <strong>IOL adapter</strong> (<code>app/infrastructure/iol</code>) is the
+      only place that knows IOL field names, endpoints, tokens, and the call
+      budget.
+    </li>
+    <li>
+      <strong>Domain</strong> (<code>app/domain</code>) holds the
+      broker-agnostic models and the pure logic: money, portfolio, indicators,
+      strategy, sizing, and risk. IOL never leaks here.
+    </li>
+  </ul>
+
+  <h2 id="ledger">The paper ledger</h2>
+  <p>
+    A <strong>paper ledger</strong> is a simulated portfolio: a pretend account
+    of fake cash and fake positions, used to practise trading without real
+    money. You create it with one button, and it is copied from the newest
+    portfolio snapshot for that country.
+  </p>
+  <p>It records:</p>
+  <ul>
+    <li><strong>Cash</strong> &mdash; pretend free money, taken from the last saved account status.</li>
+    <li><strong>Positions</strong> &mdash; one row per symbol, with a quantity, an average price, a last price, and a market.</li>
+    <li><strong>Totals</strong> &mdash; positions value, and total value (cash plus positions).</li>
+  </ul>
+  <p>
+    The ledger is the book the strategy and the risk checks reason about. A
+    decision changes the ledger, never the real account. Creating it contacts
+    IOL zero times, so it costs no API calls.
+  </p>
+
+  <h2 id="indicators">Indicators</h2>
+  <p>
+    An <strong>indicator</strong> is a number computed from a series of prices,
+    used to summarise price behaviour. All values here are calculated in Python
+    from the saved daily history, and a value stays empty until its window has
+    enough days.
+  </p>
+
+  <h3>EMA &mdash; Exponential Moving Average</h3>
+  <p>
+    A smoothed average that gives recent prices more weight than older ones, so
+    it reacts faster than a plain average. The application uses a fast
+    <code>EMA(12)</code> and a slow <code>EMA(26)</code>. When the fast line is
+    above the slow line, the recent trend is up.
+  </p>
+  <p>
+    <span class="formula">EMA&#8202;today = price&#8202;today &times; k + EMA&#8202;yesterday &times; (1 &minus; k)</span>
+    where <span class="formula">k = 2 / (period + 1)</span>. The first value is
+    the simple average of the first <em>period</em> prices.
+  </p>
+
+  <h3>RSI &mdash; Relative Strength Index</h3>
+  <p>
+    A momentum gauge between 0 and 100. It compares the size of recent gains
+    with recent losses. High values suggest the price has risen a lot already
+    (overbought); low values suggest it has fallen a lot (oversold). The
+    application uses <code>RSI(14)</code>.
+  </p>
+  <p>
+    <span class="formula">RSI = 100 &minus; 100 / (1 + RS)</span>
+    where <span class="formula">RS = average gain / average loss</span>, both
+    smoothed over the period.
+  </p>
+  <p class="muted">
+    How it is used: the strategy buys only while RSI is between
+    <strong>45</strong> and <strong>70</strong>, so it avoids buying something
+    already stretched above 70, and sells when RSI is below <strong>50</strong>.
+  </p>
+
+  <h3>MACD &mdash; Moving Average Convergence Divergence</h3>
+  <p>
+    The gap between a fast and a slow EMA, plus a smoothed version of that gap.
+    It shows whether momentum is building or fading. The application uses the
+    standard <code>12 / 26 / 9</code>.
+  </p>
+  <ul>
+    <li><span class="formula">MACD = EMA(12) &minus; EMA(26)</span></li>
+    <li><span class="formula">signal = EMA(9) of the MACD</span></li>
+    <li><span class="formula">histogram = MACD &minus; signal</span></li>
+  </ul>
+  <p class="muted">
+    How it is used: a positive histogram means momentum is turning up. The
+    strategy requires it for a buy.
+  </p>
+
+  <h3>ATR &mdash; Average True Range</h3>
+  <p>
+    A measure of how much the price moves in a day, including gaps. It is a
+    volatility number, not a direction. The application uses <code>ATR(14)</code>.
+    It is shown as context for how large normal daily swings are.
+  </p>
+
+  <h3>Supporting numbers</h3>
+  <ul>
+    <li><strong>Average volume</strong> (<code>20</code> days) &mdash; how much is normally traded, a liquidity hint.</li>
+    <li><strong>Return</strong> &mdash; the fraction the price changed over a period.</li>
+    <li><strong>Exposure</strong> &mdash; how much of the portfolio one position represents.</li>
+  </ul>
+
+  <h2 id="strategy">The strategy</h2>
+  <p>
+    The strategy is fixed Python, fully determined by its inputs. Given the
+    indicators, it returns one action per symbol:
+  </p>
+  <ul>
+    <li>
+      <strong>Buy</strong> when the fast EMA is above the slow EMA, RSI is
+      between 45 and 70, and the MACD histogram is positive &mdash; an uptrend
+      that is not already overbought.
+    </li>
+    <li>
+      <strong>Sell</strong> when the fast EMA is below the slow EMA and RSI is
+      below 50 &mdash; a downtrend with weak momentum.
+    </li>
+    <li><strong>Hold</strong> in every other case, including when there is not enough history.</li>
+  </ul>
+  <p class="muted">
+    A missing indicator never produces a trade. The reason for every action is
+    shown next to it on the Analysis page.
+  </p>
+
+  <h2 id="risk">Sizing and risk checks</h2>
+  <p>
+    Sizing picks the quantity; the risk checks decide whether the order is
+    allowed. Together they are the <strong>DecisionPolicy</strong>. Every check
+    must pass for a recommendation to count as an order. A failed check sets the
+    quantity to zero and is kept visible, so you can see exactly what was
+    blocked and why.
+  </p>
+
+  <div class="table-wrap">
+    <table class="table">
+      <thead>
+        <tr>
+          <th>Check</th>
+          <th>Limit</th>
+          <th>Applies to</th>
+          <th>Meaning</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><code>allowlist</code></td>
+          <td>GGAL, YPFD</td>
+          <td>buys and sells</td>
+          <td>Only these instruments may be traded.</td>
+        </tr>
+        <tr>
+          <td><code>order_weight</code></td>
+          <td>10% of the portfolio</td>
+          <td>buys</td>
+          <td>One new order may not add more than a tenth of the portfolio.</td>
+        </tr>
+        <tr>
+          <td><code>position_weight</code></td>
+          <td>25% of the portfolio</td>
+          <td>buys and sells</td>
+          <td>A single holding may not grow past a quarter of the portfolio.</td>
+        </tr>
+        <tr>
+          <td><code>turnover</code></td>
+          <td>20% of the portfolio</td>
+          <td>the whole plan</td>
+          <td>All orders in one proposal together may not exceed this.</td>
+        </tr>
+        <tr>
+          <td><code>cash</code></td>
+          <td>keep a 1% buffer</td>
+          <td>buys</td>
+          <td>A buy may not spend all the cash.</td>
+        </tr>
+        <tr>
+          <td><code>quantity</code></td>
+          <td>whole shares, at least 1</td>
+          <td>buys and sells</td>
+          <td>Fractional and empty orders are rejected.</td>
+        </tr>
+        <tr>
+          <td><code>shares</code></td>
+          <td>never more than held</td>
+          <td>sells</td>
+          <td>You cannot sell what you do not own.</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h2 id="proposal">The proposal</h2>
+  <p>
+    A <strong>proposal</strong> is a saved trade plan: every recommendation with
+    its evidence, its quantity, and its risk results, plus the portfolio value,
+    the cash, and the plan turnover. It is the unit you review on the Analysis
+    page.
+  </p>
+  <ul>
+    <li>
+      <strong>Approval mode</strong> is <code>HUMAN_IN_THE_LOOP</code>: a human
+      is meant to decide. The alternative, <code>AUTOMATIC</code>, is not built.
+    </li>
+    <li>
+      <strong>Execution mode</strong> is <code>PAPER</code>: decisions affect the
+      simulated ledger, never the broker.
+    </li>
+    <li>
+      A saved proposal is <strong>never edited</strong>. Running an analysis
+      again creates a new one, so a review always points at exactly the plan
+      that was risk-checked.
+    </li>
+  </ul>
+
+  <h2 id="budget">The IOL call budget</h2>
+  <p>
+    IOL is free up to a monthly number of API calls, set by
+    <code>IOL_MONTHLY_CALL_LIMIT</code> (25,000 by default). Past that limit,
+    each call costs money. To make sure the limit can never be crossed by
+    accident, the application <strong>counts every call and refuses to send one
+    once the budget is used up</strong>. Pages also show the running count
+    (&ldquo;IOL API calls this month&rdquo;).
+  </p>
+  <p class="muted">
+    The counter lives in memory and resets each month, so it is a safety net,
+    not an exact invoice. It is measured per running process.
+  </p>
+
+  <h2 id="glossary">Glossary</h2>
+  <dl class="glossary">
+    <dt>Paper trading</dt>
+    <dd>Trading against a simulated account instead of a real one. Real prices, fake money.</dd>
+
+    <dt>Paper ledger</dt>
+    <dd>The simulated portfolio this application trades against: fake cash, fake positions, real symbols and prices. It never touches your real account.</dd>
+
+    <dt>Instrument / symbol</dt>
+    <dd>A tradable thing, such as <code>GGAL</code> (a share). &ldquo;Symbol&rdquo; is its short code.</dd>
+
+    <dt>Position</dt>
+    <dd>A holding in one instrument: how many units you own and what they cost on average.</dd>
+
+    <dt>Snapshot</dt>
+    <dd>A saved copy of one broker response, with the time it was fetched. Pages read snapshots, not the network.</dd>
+
+    <dt>Stale</dt>
+    <dd>A saved snapshot shown after a refresh failed. The data is old but not lost, so it is labelled instead of hidden.</dd>
+
+    <dt>Indicator</dt>
+    <dd>A number computed from a price series that summarises one aspect of price behaviour, such as trend or momentum.</dd>
+
+    <dt>EMA</dt>
+    <dd>Exponential Moving Average. A trend line that weights recent prices more. Fast above slow suggests an uptrend.</dd>
+
+    <dt>RSI</dt>
+    <dd>Relative Strength Index. A 0&ndash;100 momentum gauge. High means possibly overbought, low means possibly oversold.</dd>
+
+    <dt>MACD</dt>
+    <dd>Moving Average Convergence Divergence. The gap between a fast and a slow EMA, plus its signal line and histogram, used to read momentum.</dd>
+
+    <dt>ATR</dt>
+    <dd>Average True Range. A volatility measure: how much the price typically moves per day, regardless of direction.</dd>
+
+    <dt>Strategy</dt>
+    <dd>The fixed rule that turns indicators into a buy, sell, or hold. Plain Python, no model, fully testable.</dd>
+
+    <dt>DecisionPolicy</dt>
+    <dd>Sizing plus the fixed risk checks. It decides how large an order may be and whether it is allowed at all.</dd>
+
+    <dt>Risk check</dt>
+    <dd>A single rule with a pass or fail result, such as the allowlist or the position cap. All checks must pass for an order.</dd>
+
+    <dt>Allowlist</dt>
+    <dd>The set of symbols allowed to be traded. Here it is <code>GGAL</code> and <code>YPFD</code>.</dd>
+
+    <dt>Turnover</dt>
+    <dd>The total value of all orders in one proposal, as a share of the portfolio.</dd>
+
+    <dt>Proposal</dt>
+    <dd>A saved, immutable trade plan: recommendations, evidence, quantities, and risk results. The thing you review.</dd>
+
+    <dt>Approval mode</dt>
+    <dd>Who decides. <code>HUMAN_IN_THE_LOOP</code> means a person approves; <code>AUTOMATIC</code> is not built yet.</dd>
+
+    <dt>Execution mode</dt>
+    <dd>Where an approved plan would be applied. <code>PAPER</code> means the simulated ledger; <code>LIVE</code> is off.</dd>
+
+    <dt>Call budget</dt>
+    <dd>The monthly cap on IOL API calls. The application counts calls and refuses to send one when the budget is spent.</dd>
+
+    <dt>Tenant isolation</dt>
+    <dd>Every query is scoped to the signed-in user. One account can never read another account's data.</dd>
+
+    <dt>Snapshot time</dt>
+    <dd>The moment a snapshot was fetched. Shown on every broker-data page so you know how fresh it is.</dd>
+
+    <dt>CSRF token</dt>
+    <dd>A hidden value in every form that proves the request came from this site, blocking cross-site form submissions.</dd>
+  </dl>
+
+  <h2 id="reading">Reading the Analysis page</h2>
+  <ul>
+    <li><strong>Paper ledger</strong> &mdash; the simulated account the plan was built against.</li>
+    <li><strong>Summary and status</strong> &mdash; the headline of the newest proposal, and whether every plan check passed.</li>
+    <li><strong>Recommendations table</strong> &mdash; one row per symbol: action, quantity, limit price, value, and the reason. A blocked order is marked.</li>
+    <li><strong>Evidence and risk checks</strong> &mdash; open a symbol to see the indicator values and every individual check.</li>
+    <li><strong>Recent proposals</strong> &mdash; earlier saved plans, each one immutable.</li>
+  </ul>
+
+  <p class="muted">
+    Still unsure about a word? Every definition on this page is also used on the
+    pages themselves, so the wording should match what you see.
+  </p>
+</section>
+{% endblock %}

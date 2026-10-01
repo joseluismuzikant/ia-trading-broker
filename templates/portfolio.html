@@ -2,7 +2,10 @@
 {% block title %}Country portfolio &middot; ia-trading-broker{% endblock %}
 
 {% block content %}
-<h1>Country portfolio</h1>
+<div class="page-head">
+  <h1>Country portfolio</h1>
+  <p>Positions read from IOL for one country and saved as a snapshot.</p>
+</div>
 
 {% if not connection %}
 <p class="alert alert--info">
@@ -13,28 +16,29 @@
   {% include "_snapshot_header.html" %}
 
   {% if portfolio %}
-    <section class="grid">
-      <article class="card">
-        <h2>Cash</h2>
-        <p class="total">
+    <section class="grid grid--stats">
+      <article class="stat">
+        <span class="stat__label">Cash</span>
+        <span class="stat__value">
           {{ "%.2f" | format(portfolio.cash) if portfolio.cash is not none else "—" }}
           <span class="muted">{{ portfolio.currency or "" }}</span>
-        </p>
-        <p class="field__hint">Taken from the last saved account status.</p>
+        </span>
+        <span class="stat__hint">From the last saved account status.</span>
       </article>
-      <article class="card">
-        <h2>Positions value</h2>
-        <p class="total">{{ "%.2f" | format(portfolio.positions_value) }}</p>
+      <article class="stat">
+        <span class="stat__label">Positions value</span>
+        <span class="stat__value">{{ "%.2f" | format(portfolio.positions_value) }}</span>
       </article>
-      <article class="card">
-        <h2>Total</h2>
-        <p class="total">
+      <article class="stat">
+        <span class="stat__label">Total</span>
+        <span class="stat__value">
           {{ "%.2f" | format(portfolio.total_value) if portfolio.total_value is not none else "—" }}
-        </p>
+        </span>
       </article>
     </section>
 
     {% if portfolio.positions %}
+    <div class="table-wrap">
     <table class="table">
       <thead>
         <tr>
@@ -63,6 +67,7 @@
         {% endfor %}
       </tbody>
     </table>
+    </div>
     {% else %}
     <p class="alert alert--info">The broker returned no positions for this country.</p>
     {% endif %}

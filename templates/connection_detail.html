@@ -2,7 +2,10 @@
 {% block title %}{{ connection.label }} &middot; ia-trading-broker{% endblock %}
 
 {% block content %}
-<h1>{{ connection.label }}</h1>
+<div class="page-head">
+  <h1>{{ connection.label }}</h1>
+  <p>One saved IOL login and the data read through it.</p>
+</div>
 
 {% if test_result == "ok" %}
 <p class="alert alert--ok">The broker accepted the saved login.</p>

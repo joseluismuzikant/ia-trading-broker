@@ -2,7 +2,10 @@
 {% block title %}New connection &middot; ia-trading-broker{% endblock %}
 
 {% block content %}
-<h1>Add an IOL connection</h1>
+<div class="page-head">
+  <h1>Add an IOL connection</h1>
+  <p>One encrypted login per IOL account. Nothing is read until you refresh.</p>
+</div>
 
 {% if error %}
 <p class="alert alert--error">{{ error }}</p>

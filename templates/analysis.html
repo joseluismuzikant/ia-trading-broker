@@ -6,11 +6,15 @@
 {% macro percent(value, places=2) %}{{ ("%." ~ places ~ "f") | format(value * 100) ~ "%" if value is not none else "—" }}{% endmacro %}
 
 {% block content %}
-<h1>Analysis</h1>
-<p class="muted">
-  Indicators, the rule-based strategy, fixed sizing, and risk checks build a
-  proposal. It is saved and shown here. <strong>No order is placed.</strong>
-</p>
+<div class="page-head">
+  <h1>Analysis</h1>
+  <p>
+    Indicators, the rule-based strategy, fixed sizing, and risk checks build a
+    proposal. It is saved and shown here.
+    <strong>No order is placed.</strong>
+    <a href="/help">What do these words mean?</a>
+  </p>
+</div>
 
 {% if not connection %}
 <p class="alert alert--info">
@@ -82,22 +86,23 @@
   No paper ledger yet. Create one from the portfolio, then run an analysis.
 </p>
 {% else %}
-<section class="grid">
-  <article class="card">
-    <h3>Paper cash</h3>
-    <p class="total">{{ money(ledger.cash) }} <span class="muted">{{ ledger.currency or "" }}</span></p>
+<section class="grid grid--stats">
+  <article class="stat">
+    <span class="stat__label">Paper cash</span>
+    <span class="stat__value">{{ money(ledger.cash) }} <span class="muted">{{ ledger.currency or "" }}</span></span>
   </article>
-  <article class="card">
-    <h3>Positions value</h3>
-    <p class="total">{{ money(ledger.positions_value) }}</p>
+  <article class="stat">
+    <span class="stat__label">Positions value</span>
+    <span class="stat__value">{{ money(ledger.positions_value) }}</span>
   </article>
-  <article class="card">
-    <h3>Total</h3>
-    <p class="total">{{ money(ledger.total_value) }}</p>
+  <article class="stat">
+    <span class="stat__label">Total</span>
+    <span class="stat__value">{{ money(ledger.total_value) }}</span>
   </article>
 </section>
 
 {% if ledger.positions %}
+<div class="table-wrap">
 <table class="table">
   <thead>
     <tr>
@@ -122,6 +127,7 @@
     {% endfor %}
   </tbody>
 </table>
+</div>
 {% else %}
 <p class="alert alert--info">The ledger has no positions.</p>
 {% endif %}
@@ -159,6 +165,7 @@
   </ul>
 </section>
 
+<div class="table-wrap">
 <table class="table">
   <thead>
     <tr>
@@ -190,6 +197,7 @@
     {% endfor %}
   </tbody>
 </table>
+</div>
 
 {% for item in proposal.recommendations %}
 <details class="card card--muted">
@@ -218,6 +226,7 @@
 
 {% if proposals %}
 <h3>Recent proposals</h3>
+<div class="table-wrap">
 <table class="table">
   <thead>
     <tr><th>Id</th><th>Created</th><th>Status</th><th class="num">Turnover</th><th></th></tr>
@@ -236,6 +245,7 @@
     {% endfor %}
   </tbody>
 </table>
+</div>
 {% endif %}
 {% endif %}
 
