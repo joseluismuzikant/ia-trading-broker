@@ -80,6 +80,10 @@
 <p class="alert alert--error">The analysis did not run. {{ message }}</p>
 {% endif %}
 
+{% if history_message %}
+<p class="alert alert--warn">{{ history_message }}</p>
+{% endif %}
+
 <h2>Paper ledger</h2>
 {% if not ledger %}
 <p class="alert alert--info">
@@ -154,6 +158,100 @@
     <dt>Created</dt><dd>{{ proposal.created_at.strftime("%Y-%m-%d %H:%M:%S UTC") if proposal.created_at else "—" }}</dd>
   </dl>
 
+  <h3>Analysis funnel</h3>
+  <p class="muted">
+    {{ universe.instruments | length }} configured instruments
+    &rarr; {{ proposal.candidates | length }} candidates
+    &rarr; {{ proposal.finalists | length }} finalists
+    &rarr; {{ proposal.orders | length }} order(s)
+  </p>
+
+  <details class="card card--muted">
+    <summary>
+      <strong>Universe</strong> &mdash; the
+      {{ universe.instruments | length }} instruments the configuration allows
+    </summary>
+    <div class="table-wrap">
+    <table class="table">
+      <thead>
+        <tr><th>Symbol</th><th>Paper</th><th>Category</th><th>Market</th></tr>
+      </thead>
+      <tbody>
+        {% for instrument in universe.instruments %}
+        <tr>
+          <td>{{ instrument.symbol }}</td>
+          <td>{{ instrument.name }}</td>
+          <td>{{ instrument.category }}</td>
+          <td>{{ instrument.market }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    </div>
+  </details>
+
+  {% if proposal.candidates %}
+  <h4>Market scanner &mdash; {{ proposal.candidates | length }} candidates</h4>
+  <div class="table-wrap">
+  <table class="table">
+    <thead>
+      <tr>
+        <th>Symbol</th>
+        <th>Paper</th>
+        <th>Category</th>
+        <th class="num">Scan score</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for row in proposal.candidates %}
+      <tr>
+        <td>{{ row.symbol }}</td>
+        <td>{{ row.name }}</td>
+        <td>{{ row.category }}</td>
+        <td class="num">{{ number(row.scan_score, 3) }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  </div>
+  {% endif %}
+
+  {% if proposal.finalists %}
+  <h4>Finalists &mdash; {{ proposal.finalists | length }}</h4>
+  <div class="table-wrap">
+  <table class="table">
+    <thead>
+      <tr>
+        <th>Symbol</th>
+        <th>Paper</th>
+        <th>Category</th>
+        <th class="num">Technical</th>
+        <th class="num">Fundamental</th>
+        <th class="num">Combined</th>
+        <th>Outside view</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for row in proposal.finalists %}
+      <tr>
+        <td>{{ row.symbol }}</td>
+        <td>{{ row.name }}</td>
+        <td>{{ row.category }}</td>
+        <td class="num">{{ number(row.technical_score, 3) }}</td>
+        <td class="num">{{ number(row.fundamental_score, 3) }}</td>
+        <td class="num">{{ number(row.combined_score, 3) }}</td>
+        <td>{{ row.fundamental_summary }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  </div>
+  {% else %}
+  <p class="alert alert--warn">
+    No instrument survived the funnel, so no new position is proposed.
+  </p>
+  {% endif %}
+
   <h3>Plan risk checks</h3>
   <ul class="checks">
     {% for check in proposal.risk_checks %}
@@ -164,6 +262,41 @@
     {% endfor %}
   </ul>
 </section>
+
+{% if proposal_record %}
+<section class="card card--tight">
+  <div class="toolbar">
+    <div>
+      <span class="muted">Review:</span>
+      <a href="/proposals/{{ proposal_record.id }}">Open the full review page</a>
+      {% if orders %}
+      <span class="muted">&middot; {{ orders | length }} order(s) saved</span>
+      {% endif %}
+    </div>
+    {% if approval %}
+    <span class="badge {{ 'badge--ok' if approval.status == 'approved' else 'badge--warn' }}">
+      approval: {{ approval.status }}
+    </span>
+    {% endif %}
+  </div>
+  {% if approval and approval.status == "pending" %}
+  <p class="muted">
+    This plan is paused for your approval. Approving re-checks prices and cash,
+    then submits it to the paper executor.
+  </p>
+  <div class="actions">
+    <form method="post" action="/proposals/{{ proposal_record.id }}/approve" class="inline-form">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+      <button type="submit" class="button">Approve and submit</button>
+    </form>
+    <form method="post" action="/proposals/{{ proposal_record.id }}/reject" class="inline-form">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+      <button type="submit" class="button button--ghost">Reject</button>
+    </form>
+  </div>
+  {% endif %}
+</section>
+{% endif %}
 
 <div class="table-wrap">
 <table class="table">

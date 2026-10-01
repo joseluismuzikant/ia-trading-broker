@@ -24,6 +24,19 @@ PORTFOLIO_PATH_PREFIX = "/api/v2/portafolio/"
 QUOTE_PATH_MARKER = "/Cotizacion"
 HISTORY_PATH_MARKER = "/Cotizacion/seriehistorica/"
 
+#: The market codes IOL documents for the quote paths. The real broker rejects
+#: anything else with a 404, so the fake does too, otherwise a lowercased market
+#: would pass the tests while failing against IOL.
+VALID_MARKETS = frozenset({"BCBA", "NYSE", "NASDAQ", "AMEX", "BCS", "ROFX"})
+
+
+def market_from_path(path: str) -> str | None:
+    """The ``{mercado}`` segment of an IOL path, or None."""
+    parts = path.split("/")
+    if len(parts) > 3 and parts[1] == "api" and parts[2] == "v2":
+        return parts[3]
+    return None
+
 
 def load_fixture(name: str) -> Any:
     """Read one saved JSON fixture."""
@@ -178,6 +191,11 @@ class FakeIOL:
             return httpx.Response(200, json=self.portfolio)
 
         # The history path also contains the quote marker, so check it first.
+        if HISTORY_PATH_MARKER in request.url.path or QUOTE_PATH_MARKER in request.url.path:
+            market = market_from_path(request.url.path)
+            if market not in VALID_MARKETS:
+                return httpx.Response(404, json={"error": "market not found"})
+
         if HISTORY_PATH_MARKER in request.url.path:
             if self.quote_error_status:
                 return httpx.Response(self.quote_error_status, json={"error": "boom"})

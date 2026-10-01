@@ -30,6 +30,8 @@
       <li><a href="#strategy">The strategy</a></li>
       <li><a href="#risk">Sizing and risk checks</a></li>
       <li><a href="#proposal">The proposal</a></li>
+      <li><a href="#approval">Approval and paper execution</a></li>
+      <li><a href="#history">The trading history</a></li>
       <li><a href="#budget">The IOL call budget</a></li>
       <li><a href="#glossary">Glossary</a></li>
     </ul>
@@ -45,8 +47,10 @@
   </p>
   <p>
     It is deliberately conservative. The decision logic is plain Python with
-    tests, not a model. Nothing is automatic yet: you press a button, the
-    analysis runs, and you read the result. No order is ever sent to the broker.
+    tests, not a model. Nothing is automatic: you press a button, the analysis
+    runs, and you read the result. When the plan holds an order you approve or
+    reject it by hand, and an approved plan is applied to the simulated ledger
+    as a <em>paper fill</em>. No order is ever sent to the broker.
   </p>
 
   <h2 id="how">How a run works</h2>
@@ -83,11 +87,20 @@
       evidence, quantities, and risk results. It is shown on the Analysis page.
       Nothing is sent to the broker.
     </li>
+    <li>
+      <strong>Wait for approval.</strong> The run pauses. The plan goes nowhere
+      until you approve or reject it. An approval covers the whole plan, expires
+      after 24 hours, and can be used only once.
+    </li>
+    <li>
+      <strong>Execute on paper.</strong> An approved plan is re-checked against
+      the latest saved prices and cash, then applied to the paper ledger as
+      simulated fills. The plan is marked done. Nothing is sent to IOL.
+    </li>
   </ol>
   <p class="muted">
-    A later day adds an approval step and paper execution, where an approved
-    proposal would be applied to the paper ledger. Until then, the proposal is
-    the end of the line.
+    Automatic mode, where a run continues without a person after the same
+    checks, is not built yet. Today every order waits for a human decision.
   </p>
 
   <h2 id="data">Snapshots and freshness</h2>
@@ -258,39 +271,55 @@
       </thead>
       <tbody>
         <tr>
-          <td><code>allowlist</code></td>
-          <td>GGAL, YPFD</td>
-          <td>buys and sells</td>
-          <td>Only these instruments may be traded.</td>
-        </tr>
-        <tr>
-          <td><code>order_weight</code></td>
-          <td>10% of the portfolio</td>
+          <td><code>finalists</code></td>
+          <td>the finalists of the run</td>
           <td>buys</td>
-          <td>One new order may not add more than a tenth of the portfolio.</td>
+          <td>Only an instrument the funnel picked may be bought. A held
+            instrument outside it may still be reduced or sold, so the money is
+            never trapped.</td>
         </tr>
         <tr>
-          <td><code>position_weight</code></td>
-          <td>25% of the portfolio</td>
-          <td>buys and sells</td>
-          <td>A single holding may not grow past a quarter of the portfolio.</td>
+          <td><code>trade_limit</code></td>
+          <td>3 orders per run</td>
+          <td>the whole run</td>
+          <td>One run may place only a few orders, which is what bounds how
+            much it can turn over at once.</td>
         </tr>
         <tr>
-          <td><code>turnover</code></td>
-          <td>20% of the portfolio</td>
-          <td>the whole plan</td>
-          <td>All orders in one proposal together may not exceed this.</td>
-        </tr>
-        <tr>
-          <td><code>cash</code></td>
-          <td>keep a 1% buffer</td>
+          <td><code>position_size</code></td>
+          <td>15% of the portfolio</td>
           <td>buys</td>
-          <td>A buy may not spend all the cash.</td>
+          <td>One position may not grow past a fifteenth of the portfolio.</td>
+        </tr>
+        <tr>
+          <td><code>cash_reserve</code></td>
+          <td>keep 10% in cash</td>
+          <td>buys</td>
+          <td>A buy may not spend the cash the account must keep.</td>
+        </tr>
+        <tr>
+          <td><code>category_cap</code></td>
+          <td>4 shares, 3 CEDEARs, 2 bonds</td>
+          <td>buys</td>
+          <td>Each kind of instrument has its own cap, so the portfolio cannot
+            fill up with one of them.</td>
+        </tr>
+        <tr>
+          <td><code>open_positions</code></td>
+          <td>8 positions</td>
+          <td>buys</td>
+          <td>The account may hold only so many positions at once.</td>
+        </tr>
+        <tr>
+          <td><code>price</code></td>
+          <td>a saved price</td>
+          <td>every order</td>
+          <td>An instrument without a usable price is held, never traded.</td>
         </tr>
         <tr>
           <td><code>quantity</code></td>
           <td>whole shares, at least 1</td>
-          <td>buys and sells</td>
+          <td>every order</td>
           <td>Fractional and empty orders are rejected.</td>
         </tr>
         <tr>
@@ -325,6 +354,57 @@
       that was risk-checked.
     </li>
   </ul>
+
+  <h2 id="approval">Approval and paper execution</h2>
+  <p>
+    When a plan holds at least one order, the run stops and waits. The plan is
+    frozen: approving it does not release the exact order that was reviewed, it
+    re-reads the latest saved prices and cash first, and stops again if anything
+    moved too far. This is the <strong>fresh-data check</strong>.
+  </p>
+  <ul>
+    <li>
+      <strong>One approval, one use.</strong> An approval covers the whole plan,
+      not a single instrument. Once the plan is executed the approval is spent
+      and cannot be used again.
+    </li>
+    <li>
+      <strong>It expires.</strong> A pending approval is valid for 24 hours.
+      After that it is refused, and a fresh analysis is needed.
+    </li>
+    <li>
+      <strong>It is protected.</strong> Approving and rejecting are forms with a
+      CSRF token, like every other action in the application, and only the owner
+      of the connection can decide.
+    </li>
+    <li>
+      <strong>Rejecting sends nothing.</strong> A rejected plan is closed with a
+      reason and no order is created.
+    </li>
+    <li>
+      <strong>A paper fill changes the ledger.</strong> Buying spends fake cash
+      and adds to a position; selling does the opposite. The average price is
+      updated on a buy and kept on a sell.
+    </li>
+    <li>
+      <strong>An unclear result is never resent.</strong> If the paper executor
+      does not clearly confirm an order, the order is marked
+      <em>unknown</em> and left for review. It is never sent a second time.
+    </li>
+  </ul>
+
+  <h2 id="history">The trading history</h2>
+  <p>
+    Every step is written to a local event log that pages can read without
+    calling IOL: the run started, the plan created, the approval requested,
+    approved, rejected or expired, the order prepared, filled, rejected or left
+    unknown, and the ledger updated. The <strong>History</strong> page shows the
+    orders and these events for one connection.
+  </p>
+  <p class="muted">
+    Orders and events are added and never edited. Each entry is scoped to the
+    signed-in user, so one account can never read another account's history.
+  </p>
 
   <h2 id="budget">The IOL call budget</h2>
   <p>
@@ -382,13 +462,22 @@
     <dd>Sizing plus the fixed risk checks. It decides how large an order may be and whether it is allowed at all.</dd>
 
     <dt>Risk check</dt>
-    <dd>A single rule with a pass or fail result, such as the allowlist or the position cap. All checks must pass for an order.</dd>
+    <dd>A single rule with a pass or fail result, such as the finalists check or the position cap. All checks must pass for an order.</dd>
 
-    <dt>Allowlist</dt>
-    <dd>The set of symbols allowed to be traded. Here it is <code>GGAL</code> and <code>YPFD</code>.</dd>
+    <dt>Universe</dt>
+    <dd>The instruments the project may trade at all. Every ticker and its paper name live in one configuration file, <code>config/universe.toml</code>, grouped into Argentine stocks, CEDEARs, and bonds. Nothing in the code names a symbol.</dd>
+
+    <dt>Analysis funnel</dt>
+    <dd>How a run narrows the universe to a few trades: the market scanner keeps the strongest candidates on cheap price readings, the technical stage scores them, the fundamental/news stage picks the finalists, and the risk manager turns at most a few of those into orders.</dd>
+
+    <dt>Finalists</dt>
+    <dd>The handful of instruments that survived the funnel. Only they may be bought in that run; a held instrument outside them can still be sold.</dd>
+
+    <dt>Portfolio constraints</dt>
+    <dd>The hard limits the risk manager enforces: how many positions, how many per category, how large one position may be, and how much cash must stay in the account. They are declared in <code>config/universe.toml</code> next to the universe.</dd>
 
     <dt>Turnover</dt>
-    <dd>The total value of all orders in one proposal, as a share of the portfolio.</dd>
+    <dd>The total value of all orders in one proposal, as a share of the portfolio. Shown for information; the run is bounded by the number of orders it may place.</dd>
 
     <dt>Proposal</dt>
     <dd>A saved, immutable trade plan: recommendations, evidence, quantities, and risk results. The thing you review.</dd>
@@ -398,6 +487,24 @@
 
     <dt>Execution mode</dt>
     <dd>Where an approved plan would be applied. <code>PAPER</code> means the simulated ledger; <code>LIVE</code> is off.</dd>
+
+    <dt>Approval</dt>
+    <dd>A single-use, expiring permission to execute one full plan. It is created when a plan is saved and must be approved before any order is submitted.</dd>
+
+    <dt>Order</dt>
+    <dd>A saved intent to buy or sell one instrument: symbol, side, quantity, and limit price. An order is written down before anything is submitted.</dd>
+
+    <dt>Fill</dt>
+    <dd>The part of an order that was actually bought or sold, with its price. A paper fill changes the paper ledger and nothing real.</dd>
+
+    <dt>Fresh-data check</dt>
+    <dd>A second look at the latest saved prices and cash just before execution. A large change stops the plan rather than release a stale order.</dd>
+
+    <dt>Idempotency key</dt>
+    <dd>A stable name for one order, built from the proposal and the symbol. A repeated submission finds the same order instead of creating a second one.</dd>
+
+    <dt>Event log</dt>
+    <dd>The local, append-only record of what a run did. It is what the History page shows.</dd>
 
     <dt>Call budget</dt>
     <dd>The monthly cap on IOL API calls. The application counts calls and refuses to send one when the budget is spent.</dd>
@@ -418,6 +525,7 @@
     <li><strong>Summary and status</strong> &mdash; the headline of the newest proposal, and whether every plan check passed.</li>
     <li><strong>Recommendations table</strong> &mdash; one row per symbol: action, quantity, limit price, value, and the reason. A blocked order is marked.</li>
     <li><strong>Evidence and risk checks</strong> &mdash; open a symbol to see the indicator values and every individual check.</li>
+    <li><strong>Approval</strong> &mdash; when a plan is waiting, an approve or reject panel appears here and links to the full review page.</li>
     <li><strong>Recent proposals</strong> &mdash; earlier saved plans, each one immutable.</li>
   </ul>
 

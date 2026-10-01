@@ -155,9 +155,60 @@ async def test_running_an_analysis_shows_a_proposal(
     assert "pending_review" in response.text
     assert "HUMAN_IN_THE_LOOP" in response.text
     assert "PAPER" in response.text
-    assert "GGAL" in response.text
     assert "Turnover" in response.text
-    assert "allowlist" in response.text
+    # The page shows the whole funnel: the configured universe with its paper
+    # names, the scanner's candidates, the finalists, and the orders.
+    assert "Analysis funnel" in response.text
+    assert "34 configured instruments" in response.text
+    assert "12 candidates" in response.text
+    assert "5 finalists" in response.text
+    assert "YPF S.A." in response.text
+    assert "Outside view" in response.text
+
+
+async def test_a_lowercase_market_still_loads_history(
+    client, make_user, password: str, fake_iol
+) -> None:
+    # IOL reports the portfolio market lowercased. It has to be normalised
+    # before the quote path is built, otherwise the history read 404s and the
+    # analysis holds with zero observations while claiming "not enough history".
+    fake_iol.portfolio["activos"][0]["titulo"]["mercado"] = "bcba"
+
+    await logged_in_user(client, make_user, password)
+    await create_connection(client)
+    await save_a_portfolio(client)
+    await create_the_ledger(client)
+
+    page = await client.get("/analysis")
+    response = await client.post(
+        "/analysis/run",
+        data={"csrf_token": extract_csrf(page.text), "country": "argentina"},
+        follow_redirects=True,
+    )
+
+    assert response.status_code == 200
+    assert "Not enough history" not in response.text
+    assert "Could not refresh the price history" not in response.text
+
+
+async def test_a_failed_history_read_is_reported(
+    client, make_user, password: str, fake_iol
+) -> None:
+    await logged_in_user(client, make_user, password)
+    await create_connection(client)
+    await save_a_portfolio(client)
+    await create_the_ledger(client)
+    fake_iol.quote_error_status = 500
+
+    page = await client.get("/analysis")
+    response = await client.post(
+        "/analysis/run",
+        data={"csrf_token": extract_csrf(page.text), "country": "argentina"},
+        follow_redirects=True,
+    )
+
+    assert response.status_code == 200
+    assert "Could not refresh the price history" in response.text
 
 
 async def test_running_without_a_ledger_is_reported(

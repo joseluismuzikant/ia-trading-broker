@@ -1,0 +1,118 @@
+{% extends "base.html" %}
+{% block title %}History &middot; ia-trading-broker{% endblock %}
+
+{% block content %}
+<div class="page-head">
+  <h1>Trading history</h1>
+  <p>
+    Everything the application did, read from the local database. No broker call
+    is made to show this page.
+  </p>
+</div>
+
+{% if not connection %}
+<p class="alert alert--info">
+  No broker connection yet. <a href="/connections/new">Add one</a> to build a
+  history.
+</p>
+{% else %}
+<section class="card card--tight">
+  <div class="toolbar">
+    <div>
+      <span class="muted">Connection:</span>
+      <strong>{{ connection.label }}</strong>
+      <span class="muted">({{ connection.username }})</span>
+    </div>
+    <form method="get" action="/history" class="toolbar toolbar--sub" style="margin: 0;">
+      <label class="field__label" for="connection_id">Show</label>
+      <select class="field__input" id="connection_id" name="connection_id">
+        {% for item in connections %}
+        <option value="{{ item.id }}" {% if item.id == connection.id %}selected{% endif %}>
+          {{ item.label }}
+        </option>
+        {% endfor %}
+      </select>
+      <button type="submit" class="button button--ghost">Show</button>
+    </form>
+  </div>
+</section>
+
+<h2>Orders</h2>
+{% if not orders %}
+<p class="alert alert--info">No orders saved for this connection yet.</p>
+{% else %}
+<div class="table-wrap">
+<table class="table">
+  <thead>
+    <tr>
+      <th>Id</th>
+      <th>Proposal</th>
+      <th>Symbol</th>
+      <th>Side</th>
+      <th class="num">Quantity</th>
+      <th class="num">Limit</th>
+      <th>Status</th>
+      <th>Created</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for record in orders %}
+    <tr>
+      <td>{{ record.id }}</td>
+      <td>
+        {% if record.proposal_id %}
+        <a href="/proposals/{{ record.proposal_id }}">{{ record.proposal_id }}</a>
+        {% else %}—{% endif %}
+      </td>
+      <td>{{ record.symbol }}</td>
+      <td>{{ record.side }}</td>
+      <td class="num">{{ record.payload.quantity }}</td>
+      <td class="num">{{ record.payload.limit_price }}</td>
+      <td>
+        <span class="badge {{ 'badge--ok' if record.status == 'filled' else 'badge--warn' }}">
+          {{ record.status }}
+        </span>
+      </td>
+      <td>{{ record.created_at.strftime("%Y-%m-%d %H:%M:%S UTC") }}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+</div>
+{% endif %}
+
+<h2>Events</h2>
+{% if not events %}
+<p class="alert alert--info">No events yet. Run an analysis to start the history.</p>
+{% else %}
+<div class="table-wrap">
+<table class="table">
+  <thead>
+    <tr>
+      <th>When</th>
+      <th>Category</th>
+      <th>Event</th>
+      <th>Proposal</th>
+      <th>Message</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for event in events %}
+    <tr>
+      <td>{{ event.created_at.strftime("%Y-%m-%d %H:%M:%S UTC") }}</td>
+      <td>{{ event.category }}</td>
+      <td>{{ event.event_type }}</td>
+      <td>
+        {% if event.proposal_id %}
+        <a href="/proposals/{{ event.proposal_id }}">{{ event.proposal_id }}</a>
+        {% else %}—{% endif %}
+      </td>
+      <td>{{ event.message }}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+</div>
+{% endif %}
+{% endif %}
+{% endblock %}

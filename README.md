@@ -61,7 +61,7 @@ The application reads a user's account and market data, decides whether to buy, 
 | Fill | The part of an order that has actually been bought or sold. |
 | Transaction | A completed broker operation shown in account history. |
 | Proposal | The complete trade plan shown before execution. |
-| Allowlist | The fixed list of instruments the strategy is allowed to trade. |
+| Universe | The instruments the project may trade, each ticker with its paper name, declared in `config/universe.toml`. |
 | Exposure | How much of the portfolio is invested in one instrument or market. |
 | Turnover | How much of the portfolio the plan wants to trade in one run. |
 | Paper trading | Simulated trading. No real money or real IOL order is used. |
@@ -341,7 +341,7 @@ The first web pages will include:
 - **Transaction history** — IOL operations plus local proposals, approvals, orders, fills, cancellations, and failures. Show source, paper/live mode, filters, and detail views.
 - **New weekly analysis** — manual analysis settings.
 - **Analysis status** — current node, progress, result, or safe error.
-- **Strategy settings** — human-in-the-loop or automatic mode, paper/live mode, schedule, limits, and allowlist.
+- **Strategy settings** — human-in-the-loop or automatic mode, paper/live mode, schedule, limits, and the trading universe.
 - **Proposal review** — evidence, decision, quantities, risks, and approval controls for human mode.
 - **Automatic trading monitor** — enabled/disabled state, paper/live state, next and last run, current graph node, last heartbeat, latest decision, active orders, fills, rejected risk checks, stale-data warnings, failures, and reconciliation status.
 - **Automatic trading controls** — pause/resume paper automation, disable automatic execution, and activate the live kill switch. Enabling live automatic trading requires a separate protected action and remains off by default.
@@ -353,6 +353,46 @@ The first web pages will include:
 Profile, account, portfolio, history, and monitor pages show the latest saved snapshot immediately. A refresh calls IOL through the backend and saves a new snapshot. If the refresh fails, the last snapshot stays visible and is marked stale. Known data is never deleted.
 
 A separate React application is not needed for the first release. The backend has clear boundaries, so React can replace the HTML pages later without changing the trading rules.
+
+## Trading universe and analysis funnel
+
+The instruments the project may trade are declared in one file,
+[`config/universe.toml`](config/universe.toml): every ticker with its paper
+name, grouped into `argentina_stocks`, `cedears`, and `bonds`. Nothing in the
+code names a symbol, so changing the universe is a data edit and not a code
+change. The same file holds the portfolio constraints and the widths of the
+analysis funnel.
+
+A run narrows the universe before it sizes anything expensive:
+
+1. **Market scanner** — every configured instrument is read from cheap
+   price-history snapshots and reduced to the 10-12 strongest candidates on
+   trend, momentum, and liquidity.
+2. **Technical analysis** — EMA, RSI, MACD, and ATR are scored on those
+   candidates only.
+3. **Fundamental/news analysis** — one outside view per candidate, cut to about
+   5 finalists. The view comes through the `FundamentalAnalyzer` port; the
+   shipped adapter is a documented deterministic placeholder that needs no key
+   and no network, so the funnel runs end to end today. A news or language-model
+   adapter replaces it behind the same port later.
+4. **Risk manager** — the finalists are turned into at most a few orders under
+   the portfolio constraints.
+
+The constraints, all in `config/universe.toml`:
+
+| Constraint | Meaning |
+|---|---|
+| `max_open_positions` | How many positions the account may hold at once. |
+| `max_argentina_stock_positions` | How many of them may be Argentine stocks. |
+| `max_cedear_positions` | How many may be CEDEARs. |
+| `max_bond_positions` | How many may be bonds. |
+| `max_single_position_pct` | Largest share of the portfolio one position may reach. A buy tops its position up to this limit. |
+| `min_cash_pct` | Smallest share of the portfolio that must stay in cash. |
+| `max_trades_per_run` | How many orders one run may place, which is what bounds how much a run turns over. |
+
+Only a finalist may be bought in a run. A held instrument outside the finalists
+is still judged, and may be sold when the strategy says so, so the money is
+never trapped.
 
 ## Trading history
 
@@ -390,7 +430,7 @@ The first version does not include IBKR. A future broker should use the same por
 
 ## Repository status
 
-This README is the implementation plan. Day 1 (FastAPI, login, PostgreSQL, Docker Compose, and health checks), Day 2 (encrypted IOL connections, profile, and account status), Day 3 (country portfolio and market-data reads, with IOL call budgeting), and Day 4 (Python indicators, a paper ledger, a rule-based strategy, fixed risk checks, and an immutable proposal) are implemented. See [day1/README.md](day1/README.md), [day2/README.md](day2/README.md), [day3/README.md](day3/README.md), and [day4/README.md](day4/README.md) for setup and startup instructions. Later trading features are still planned; there is no live trading and no order placement.
+This README is the implementation plan. Day 1 (FastAPI, login, PostgreSQL, Docker Compose, and health checks), Day 2 (encrypted IOL connections, profile, and account status), Day 3 (country portfolio and market-data reads, with IOL call budgeting), Day 4 (Python indicators, a paper ledger, a rule-based strategy, fixed risk checks, and an immutable proposal), and Day 5 (the LangGraph flow with a single-use human approval, a fresh-data re-check, paper execution, and a local trading history) are implemented. See [day1/README.md](day1/README.md), [day2/README.md](day2/README.md), [day3/README.md](day3/README.md), [day4/README.md](day4/README.md), and [day5/README.md](day5/README.md) for setup and startup instructions. Later trading features are still planned; there is no live trading, and orders are applied only to the paper ledger.
 
 Planned structure:
 
@@ -475,6 +515,8 @@ Implemented. See [day4/README.md](day4/README.md). The proposal is saved and sho
 - Test a restart while approval is waiting and test a repeated approval request.
 
 **Done when:** the browser flow runs from login to an approved paper trade, and the history page shows every step.
+
+Implemented. See [day5/README.md](day5/README.md). The flow pauses for a single-use approval, re-checks the saved data, applies paper fills to the ledger, and records every step in the local history. Automatic mode is Day 6; live trading stays off.
 
 ### Week 2 — Automatic paper mode
 
@@ -578,9 +620,20 @@ Implemented. See [day4/README.md](day4/README.md). The proposal is saved and sho
 
 ## Running the project
 
-See [day1/README.md](day1/README.md) for the Day 1 startup guide (Docker Compose, local Python setup, admin creation, health checks, and tests), [day2/README.md](day2/README.md) for the Day 2 guide (credential-encryption key, connecting an IOL account, reading the profile and account status, and one real read), [day3/README.md](day3/README.md) for the Day 3 guide (country portfolio, quotes and price history, and the IOL monthly call budget), and [day4/README.md](day4/README.md) for the Day 4 guide (indicators, the paper ledger, the strategy and risk limits, and the proposal review page). Database tables are created automatically when the app or CLI starts; no migration tool is used. Schema changes after Day 1 will require an explicit upgrade plan.
+See [day1/README.md](day1/README.md) for the Day 1 startup guide (Docker Compose, local Python setup, admin creation, health checks, and tests), [day2/README.md](day2/README.md) for the Day 2 guide (credential-encryption key, connecting an IOL account, reading the profile and account status, and one real read), [day3/README.md](day3/README.md) for the Day 3 guide (country portfolio, quotes and price history, and the IOL monthly call budget), [day4/README.md](day4/README.md) for the Day 4 guide (indicators, the paper ledger, the strategy and risk limits, and the proposal review page), and [day5/README.md](day5/README.md) for the Day 5 guide (the approval flow, the fresh-data check, paper execution, and the history page). Database tables are created automatically when the app or CLI starts; no migration tool is used. Schema changes after Day 1 will require an explicit upgrade plan.
 
 Never commit real passwords or tokens. Copy `.env.example` to the ignored `.env` file and replace its placeholders.
+
+## Market-data reads
+
+Price history is read from `GET /api/v2/{mercado}/Titulos/{simbolo}/Cotizacion`. Two parts of that path are easy to get wrong, and together they produced empty price snapshots that the analysis then reported as "not enough history":
+
+- The market segment must be uppercase. IOL answers `404` for `bcba`, while the portfolio payload reports the market lowercased.
+- The adjustment segment must be `SinAjustar` or `Ajustada`, not a boolean.
+
+Both are normalised inside the IOL adapter, and the read path uppercases the market before the request is built, so a market stored in any case reaches IOL correctly.
+
+A failed history read never stops an analysis and is never disguised as missing data. The run continues on whatever history is already saved, and the analysis page shows one warning naming each affected symbol and the reason, for example `Could not refresh the price history for GGAL (The broker does not know ...). Those symbols are judged on saved data and may show as not enough history.` A failed refresh marks the existing snapshot stale; it never deletes it.
 
 ## Security
 

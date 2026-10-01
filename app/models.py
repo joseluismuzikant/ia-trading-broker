@@ -46,6 +46,24 @@ def ledger_snapshot_kind(country: str) -> str:
 #: so the plan a user reviews cannot drift from the plan that was risk-checked.
 PROPOSAL_PENDING = "pending_review"
 
+#: Human approval lifecycle values. They mirror ``ApprovalStatus`` in the domain
+#: layer but are repeated here so a query never imports the domain package.
+APPROVAL_PENDING = "pending"
+APPROVAL_APPROVED = "approved"
+APPROVAL_REJECTED = "rejected"
+APPROVAL_EXPIRED = "expired"
+APPROVAL_CONSUMED = "consumed"
+
+#: Order lifecycle values, mirroring ``OrderStatus``.
+ORDER_PREPARED = "prepared"
+
+#: Event categories used by the history page and the per-run timeline.
+EVENT_RUN = "run"
+EVENT_PROPOSAL = "proposal"
+EVENT_APPROVAL = "approval"
+EVENT_ORDER = "order"
+EVENT_LEDGER = "ledger"
+
 
 def utcnow() -> datetime:
     """Return the current UTC time."""
@@ -228,4 +246,137 @@ class ProposalRecord(Base):
         return (
             f"<ProposalRecord id={self.id} connection_id={self.connection_id} "
             f"status={self.status!r}>"
+        )
+
+
+class Approval(Base):
+    """A human decision on exactly one saved proposal.
+
+    An approval is created when a proposal pauses for review, expires after
+    :data:`~app.domain.trading.APPROVAL_TTL_HOURS`, and is consumed exactly once
+    when the order service is reached. It is the single-use token that lets a
+    paused run continue, and PostgreSQL, not an in-memory checkpoint, is what
+    survives a restart.
+    """
+
+    __tablename__ = "approvals"
+    __table_args__ = (
+        Index(
+            "ix_approvals_lookup", "connection_id", "proposal_id", "requested_at"
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), index=True
+    )
+    connection_id: Mapped[int] = mapped_column(
+        ForeignKey("broker_connections.id", ondelete="CASCADE"), index=True
+    )
+    proposal_id: Mapped[int] = mapped_column(
+        ForeignKey("proposals.id", ondelete="CASCADE"), index=True
+    )
+    status: Mapped[str] = mapped_column(String(32), default=APPROVAL_PENDING)
+    requested_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow
+    )
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    decided_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), default=None
+    )
+    decided_by_user_id: Mapped[int | None] = mapped_column(Integer, default=None)
+    #: Set when the approval is consumed by the order service. Single-use.
+    used_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), default=None
+    )
+    #: Short, safe text explaining a rejection or an expiry.
+    reason: Mapped[str | None] = mapped_column(String(200), default=None)
+
+    def __repr__(self) -> str:  # pragma: no cover - debug helper
+        return (
+            f"<Approval id={self.id} proposal_id={self.proposal_id} "
+            f"status={self.status!r}>"
+        )
+
+
+class OrderRecord(Base):
+    """One saved order, from intent to result.
+
+    The row is written *before* the executor is called, so a crash, a restart,
+    or a repeated request finds the same order instead of creating a second one.
+    The unique ``idempotency_key`` is what makes a resubmit safe. The ``payload``
+    is the full :class:`~app.domain.trading.Order`.
+    """
+
+    __tablename__ = "orders"
+    __table_args__ = (
+        UniqueConstraint("idempotency_key", name="uq_orders_idempotency_key"),
+        Index("ix_orders_lookup", "connection_id", "proposal_id", "created_at"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), index=True
+    )
+    connection_id: Mapped[int] = mapped_column(
+        ForeignKey("broker_connections.id", ondelete="CASCADE"), index=True
+    )
+    proposal_id: Mapped[int | None] = mapped_column(
+        ForeignKey("proposals.id", ondelete="SET NULL"), default=None, index=True
+    )
+    country: Mapped[str] = mapped_column(String(32))
+    symbol: Mapped[str] = mapped_column(String(32))
+    side: Mapped[str] = mapped_column(String(8))
+    status: Mapped[str] = mapped_column(String(32), default=ORDER_PREPARED)
+    execution_mode: Mapped[str] = mapped_column(String(16), default="PAPER")
+    idempotency_key: Mapped[str] = mapped_column(String(160))
+    broker_order_id: Mapped[str | None] = mapped_column(String(160), default=None)
+    #: The full order, including quantity, prices, and the fill.
+    payload: Mapped[dict] = mapped_column(JSON)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, onupdate=utcnow
+    )
+
+    def __repr__(self) -> str:  # pragma: no cover - debug helper
+        return (
+            f"<OrderRecord id={self.id} symbol={self.symbol!r} "
+            f"status={self.status!r}>"
+        )
+
+
+class TradingEvent(Base):
+    """One step in the local trading history.
+
+    Events are append-only and are what the history page reads. They record what
+    happened, in which mode, and against which proposal and order, so a run can
+    be reconstructed without reading any logs.
+    """
+
+    __tablename__ = "trading_events"
+    __table_args__ = (
+        Index("ix_trading_events_lookup", "connection_id", "created_at"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), index=True
+    )
+    connection_id: Mapped[int] = mapped_column(
+        ForeignKey("broker_connections.id", ondelete="CASCADE"), index=True
+    )
+    proposal_id: Mapped[int | None] = mapped_column(Integer, default=None, index=True)
+    order_id: Mapped[int | None] = mapped_column(Integer, default=None, index=True)
+    category: Mapped[str] = mapped_column(String(32))
+    event_type: Mapped[str] = mapped_column(String(48))
+    message: Mapped[str] = mapped_column(String(300))
+    #: The approval or execution mode this step ran under, when relevant.
+    mode: Mapped[str | None] = mapped_column(String(32), default=None)
+    payload: Mapped[dict | None] = mapped_column(JSON, default=None)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+    def __repr__(self) -> str:  # pragma: no cover - debug helper
+        return (
+            f"<TradingEvent id={self.id} category={self.category!r} "
+            f"type={self.event_type!r}>"
         )
