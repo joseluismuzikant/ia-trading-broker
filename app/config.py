@@ -66,6 +66,17 @@ class Settings(BaseSettings):
     #: file shipped with the application (``config/universe.toml``).
     universe_config_path: str = ""
 
+    # --- OpenAI analysis (optional) --------------------------------------
+    #: The portfolio analyst is not wired in yet, so no key is required to
+    #: start: the deterministic advisor keeps working without one. SecretStr
+    #: keeps the key masked in reprs, logs, and diagnostics.
+    openai_api_key: SecretStr | None = None
+    #: Model the analyst asks for. Nothing in the application is written
+    #: against one particular model; this is only what the setting says.
+    openai_model: str = "gpt-4o-mini"
+    openai_base_url: str = "https://api.openai.com/v1"
+    openai_timeout_seconds: float = Field(default=30.0, gt=0)
+
     # --- Trading safety switches (both stay off until proven safe) --------
     live_trading_enabled: bool = False
     automatic_live_trading_enabled: bool = False

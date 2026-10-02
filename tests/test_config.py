@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import pytest
+from pydantic import SecretStr
+
 from app.config import (
     INSECURE_DEFAULT_ENCRYPTION_KEY,
     INSECURE_DEFAULT_SECRET,
@@ -99,3 +102,48 @@ def test_production_rejects_the_public_encryption_key() -> None:
 
     problems = settings.configuration_problems()
     assert any("credential_encryption_key" in problem for problem in problems)
+
+
+# --- OpenAI settings ------------------------------------------------------
+
+
+def test_the_application_starts_without_an_openai_key() -> None:
+    # The analyst is not wired in yet, so a missing key must never stop the
+    # application or the tests.
+    settings = Settings(
+        _env_file=None,
+        environment="development",
+        secret_key="a-development-secret-of-sufficient-length",
+        database_url="sqlite+aiosqlite:///:memory:",
+    )
+
+    assert settings.openai_api_key is None
+    assert settings.configuration_problems() == []
+
+
+def test_the_openai_key_is_kept_secret() -> None:
+    settings = Settings(
+        _env_file=None,
+        environment="development",
+        secret_key="a-development-secret-of-sufficient-length",
+        database_url="sqlite+aiosqlite:///:memory:",
+        openai_api_key="sk-test-not-a-real-key",
+    )
+
+    assert isinstance(settings.openai_api_key, SecretStr)
+    assert "sk-test-not-a-real-key" not in repr(settings)
+    assert "sk-test-not-a-real-key" not in str(settings.openai_api_key)
+    assert settings.openai_api_key.get_secret_value() == "sk-test-not-a-real-key"
+
+
+def test_an_invalid_openai_timeout_is_rejected() -> None:
+    from pydantic import ValidationError
+
+    for timeout in (0, -1):
+        with pytest.raises(ValidationError):
+            Settings(
+                _env_file=None,
+                secret_key="a-development-secret-of-sufficient-length",
+                database_url="sqlite+aiosqlite:///:memory:",
+                openai_timeout_seconds=timeout,
+            )

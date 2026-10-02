@@ -1,0 +1,236 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Proposal ID {{ proposal_record.id }} &middot; {{ settings().app_name }}</title>
+  <style>
+    :root { color-scheme: light; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+        "Helvetica Neue", Arial, sans-serif;
+      color: #10151b;
+      background: #ffffff;
+      margin: 0;
+      padding: 24px 28px;
+      font-size: 12px;
+      line-height: 1.45;
+    }
+    h1 { font-size: 20px; margin: 0 0 2px; }
+    h2 { font-size: 14px; margin: 22px 0 8px; border-bottom: 1px solid #c9d1d9; padding-bottom: 4px; }
+    h3 { font-size: 12px; margin: 16px 0 6px; }
+    p { margin: 4px 0; }
+    .muted { color: #59636e; }
+    .head { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; }
+    .badge {
+      display: inline-block; padding: 2px 8px; border-radius: 999px;
+      border: 1px solid #c9d1d9; font-size: 11px; text-transform: uppercase;
+    }
+    table { width: 100%; border-collapse: collapse; margin: 6px 0 10px; }
+    th, td { border: 1px solid #d5dbe1; padding: 4px 6px; text-align: left; vertical-align: top; }
+    th { background: #f2f4f7; font-weight: 600; }
+    td.num, th.num { text-align: right; white-space: nowrap; }
+    .kv { display: grid; grid-template-columns: max-content 1fr; gap: 2px 14px; margin: 6px 0; }
+    .kv dt { font-weight: 600; }
+    .kv dd { margin: 0; }
+    .checks { list-style: none; padding: 0; margin: 6px 0; }
+    .checks li { padding: 3px 0; border-bottom: 1px dotted #e1e5ea; }
+    .pass { font-weight: 700; }
+    .foot { margin-top: 26px; padding-top: 8px; border-top: 1px solid #c9d1d9; color: #59636e; }
+    .actions { margin: 14px 0; }
+    .button { padding: 6px 12px; border: 1px solid #10151b; background: #10151b; color: #fff;
+      border-radius: 6px; cursor: pointer; font-size: 12px; }
+    @page { margin: 14mm; }
+    @media print {
+      body { padding: 0; }
+      .actions { display: none; }
+      h2 { break-after: avoid; }
+      table { break-inside: auto; }
+      tr { break-inside: avoid; }
+      thead { display: table-header-group; }
+    }
+  </style>
+</head>
+<body onload="window.print()">
+  <div class="head">
+    <div>
+      <h1>Proposal ID {{ proposal_record.id }}</h1>
+      <p class="muted">
+        {{ connection.label }} ({{ connection.username }}) &middot;
+        {{ proposal.country.replace("_", " ") | title }} &middot;
+        created {{ proposal_record.created_at | localtime }}
+      </p>
+    </div>
+    <span class="badge">{{ proposal.status }}</span>
+  </div>
+
+  <div class="actions">
+    <button class="button" type="button" onclick="window.print()">Print / Save as PDF</button>
+  </div>
+
+  <p>{{ proposal.summary }}</p>
+
+  <h2>Key figures</h2>
+  <dl class="kv">
+    <dt>Approval mode</dt><dd>{{ proposal.approval_mode }}</dd>
+    <dt>Execution mode</dt><dd>{{ proposal.execution_mode }}</dd>
+    <dt>Portfolio value</dt><dd>{{ proposal.portfolio_value | money(proposal.currency) }}</dd>
+    <dt>Cash at plan time</dt><dd>{{ proposal.cash | money(proposal.currency) }}</dd>
+    <dt>Turnover</dt><dd>{{ proposal.turnover | percent }}</dd>
+  </dl>
+
+  <h2>Plan risk checks</h2>
+  {% if proposal.risk_checks %}
+  <ul class="checks">
+    {% for check in proposal.risk_checks %}
+    <li>
+      <span class="pass">{{ "PASS" if check.passed else "FAIL" }}</span>
+      &mdash; <span class="muted">{{ check.name }}</span>: {{ check.detail }}
+    </li>
+    {% endfor %}
+  </ul>
+  {% else %}
+  <p class="muted">No plan-level checks.</p>
+  {% endif %}
+
+  <h2>Analysis funnel</h2>
+  <p class="muted">
+    {{ universe.instruments | length }} configured instruments
+    &rarr; {{ proposal.candidates | length }} candidates
+    &rarr; {{ proposal.finalists | length }} finalists
+    &rarr; {{ proposal.orders | length }} order(s)
+  </p>
+
+  {% if proposal.finalists %}
+  <h3>Finalists</h3>
+  <table>
+    <thead>
+      <tr>
+        <th>Symbol</th><th>Paper</th><th>Category</th>
+        <th class="num">Technical</th><th class="num">Fundamental</th>
+        <th class="num">Combined</th><th>Outside view</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for row in proposal.finalists %}
+      <tr>
+        <td>{{ row.symbol }}</td>
+        <td>{{ row.name }}</td>
+        <td>{{ row.category }}</td>
+        <td class="num">{{ row.technical_score | number(3) }}</td>
+        <td class="num">{{ row.fundamental_score | number(3) }}</td>
+        <td class="num">{{ row.combined_score | number(3) }}</td>
+        <td>{{ row.fundamental_summary }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
+
+  {% if proposal.candidates %}
+  <h3>Market scanner candidates</h3>
+  <table>
+    <thead>
+      <tr>
+        <th>Symbol</th><th>Paper</th><th>Category</th><th class="num">Scan score</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for row in proposal.candidates %}
+      <tr>
+        <td>{{ row.symbol }}</td>
+        <td>{{ row.name }}</td>
+        <td>{{ row.category }}</td>
+        <td class="num">{{ row.scan_score | number(3) }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
+
+  <h2>Plan</h2>
+  <table>
+    <thead>
+      <tr>
+        <th>Symbol</th><th>Action</th><th class="num">Quantity</th>
+        <th class="num">Limit</th><th class="num">Notional</th>
+        <th class="num">Weight</th><th>Reason</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for item in proposal.recommendations %}
+      <tr>
+        <td>{{ item.name or item.symbol }}</td>
+        <td>{{ item.action }}{{ " (blocked)" if item.action != "HOLD" and not item.passed_risk else "" }}</td>
+        <td class="num">{{ item.quantity | number(4) }}</td>
+        <td class="num">{{ item.limit_price | money(proposal.currency) }}</td>
+        <td class="num">{{ item.notional | money(proposal.currency) }}</td>
+        <td class="num">{{ item.weight_after | percent }}</td>
+        <td>{{ item.rationale }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+
+  <h2>Orders</h2>
+  {% if orders %}
+  <table>
+    <thead>
+      <tr>
+        <th>Order ID</th><th>Symbol</th><th>Side</th>
+        <th class="num">Quantity</th><th class="num">Limit</th><th>Status</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for order in orders %}
+      <tr>
+        <td>{{ order.id }}</td>
+        <td>{{ order.symbol }}</td>
+        <td>{{ order.side }}</td>
+        <td class="num">{{ order.payload.quantity | number(4) }}</td>
+        <td class="num">{{ order.payload.limit_price | money(proposal.currency) }}</td>
+        <td>{{ order.status }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p class="muted">No order has been saved for this proposal.</p>
+  {% endif %}
+
+  <h2>Approval</h2>
+  {% if approval is none %}
+  <p class="muted">No approval was opened for this proposal.</p>
+  {% else %}
+  <dl class="kv">
+    <dt>Decision</dt><dd>{{ approval.status }}</dd>
+    <dt>Requested</dt><dd>{{ approval.requested_at | localtime }}</dd>
+    <dt>Decided</dt><dd>{{ approval.decided_at | localtime if approval.decided_at else "—" }}</dd>
+    <dt>Used</dt><dd>{{ approval.used_at | localtime if approval.used_at else "—" }}</dd>
+    {% if approval.reason %}<dt>Reason</dt><dd>{{ approval.reason }}</dd>{% endif %}
+  </dl>
+  {% endif %}
+
+  {% if events %}
+  <h2>Timeline</h2>
+  <table>
+    <thead>
+      <tr><th>When</th><th>Event</th><th>Message</th></tr>
+    </thead>
+    <tbody>
+      {% for event in events %}
+      <tr>
+        <td>{{ event.created_at | localtime }}</td>
+        <td>{{ event.event_type }}</td>
+        <td>{{ event.message }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
+
+  <p class="foot">
+    Exported {{ generated_at | localtime }} &middot; {{ settings().app_name }}.
+    Paper-mode document: no order was placed by this export.
+  </p>
+</body>
+</html>

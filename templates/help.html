@@ -32,6 +32,7 @@
       <li><a href="#proposal">The proposal</a></li>
       <li><a href="#approval">Approval and paper execution</a></li>
       <li><a href="#history">The trading history</a></li>
+      <li><a href="#showing">How values are shown</a></li>
       <li><a href="#budget">The IOL call budget</a></li>
       <li><a href="#glossary">Glossary</a></li>
     </ul>
@@ -353,6 +354,12 @@
       again creates a new one, so a review always points at exactly the plan
       that was risk-checked.
     </li>
+    <li>
+      <strong>Export PDF.</strong> The review page can print the plan. The
+      button opens a clean document with the funnel, the plan, the orders, the
+      approval, and the timeline, and the browser's print dialog saves it as a
+      PDF. The site navigation and the buttons are left out of the document.
+    </li>
   </ul>
 
   <h2 id="approval">Approval and paper execution</h2>
@@ -404,6 +411,27 @@
   <p class="muted">
     Orders and events are added and never edited. Each entry is scoped to the
     signed-in user, so one account can never read another account's history.
+  </p>
+
+  <h2 id="showing">How values are shown</h2>
+  <p>
+    Amounts are shown the way a local reader expects them: thousands separated
+    by a dot and decimals by a comma, with the currency code after the amount
+    &mdash; <strong>99.895,16 ARS</strong> rather than
+    <code>99895.16 ARS</code>. A missing amount is shown as a dash, never as
+    zero. The code is taken from the data (<code>Peso_Argentino</code> becomes
+    <code>ARS</code>), so it is never guessed.
+  </p>
+  <p>
+    Timestamps are shown in local time with their offset from UTC, for example
+    <strong>2026-10-02 11:42:06 UTC-3</strong>, instead of the UTC the database
+    stores. Every page and the PDF export show the same format, so a saved plan
+    can be read next to a printed one.
+  </p>
+  <p>
+    When the number of a plan is shown &mdash; in the history, in an event, or
+    in a link &mdash; it is labelled <strong>Proposal ID</strong>. The word
+    <strong>Proposal</strong> on its own means the plan, not the number.
   </p>
 
   <h2 id="budget">The IOL call budget</h2>
@@ -481,6 +509,9 @@
 
     <dt>Proposal</dt>
     <dd>A saved, immutable trade plan: recommendations, evidence, quantities, and risk results. The thing you review.</dd>
+
+    <dt>Proposal ID</dt>
+    <dd>The number of one saved proposal. It is what the history, the events, and the links point at, so it is labelled <strong>Proposal ID</strong> whenever the number itself is shown. The word <strong>Proposal</strong> on its own means the plan, not the number.</dd>
 
     <dt>Approval mode</dt>
     <dd>Who decides. <code>HUMAN_IN_THE_LOOP</code> means a person approves; <code>AUTOMATIC</code> is not built yet.</dd>

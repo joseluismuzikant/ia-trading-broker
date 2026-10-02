@@ -8,6 +8,7 @@ and both are single-use: the approval service refuses a second decision.
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, Form, HTTPException, Request, status
@@ -42,21 +43,20 @@ async def _load_record(db: AsyncSession, *, user_id: int, proposal_id: int):
     return record
 
 
-@router.get("/proposals/{proposal_id}", response_class=HTMLResponse)
-async def proposal_review(
-    request: Request,
+async def _review_context(
+    db: AsyncSession,
+    *,
+    user_id: int,
     proposal_id: int,
-    auth: AuthContext = Depends(require_user),
-    db: AsyncSession = Depends(get_db),
-) -> HTMLResponse:
-    """Show one proposal with its approval, orders, and timeline."""
-    record = await _load_record(db, user_id=auth.user.id, proposal_id=proposal_id)
+) -> dict:
+    """Everything a proposal page shows: the plan and how it was decided."""
+    record = await _load_record(db, user_id=user_id, proposal_id=proposal_id)
     connection = await connections_service.get_connection(
-        db, user_id=auth.user.id, connection_id=record.connection_id
+        db, user_id=user_id, connection_id=record.connection_id
     )
 
     approval = await approvals_service.latest_approval(
-        db, user_id=auth.user.id, proposal_id=proposal_id
+        db, user_id=user_id, proposal_id=proposal_id
     )
     if approval is not None:
         # A pending approval past its window is shown as expired.
@@ -66,33 +66,76 @@ async def proposal_review(
         update={"status": record.status}
     )
     orders = await orders_service.list_orders_for_proposal(
-        db, user_id=auth.user.id, proposal_id=proposal_id
+        db, user_id=user_id, proposal_id=proposal_id
     )
     events = await events_service.list_events_for_proposal(
-        db, user_id=auth.user.id, proposal_id=proposal_id
+        db, user_id=user_id, proposal_id=proposal_id
     )
     ledger = await ledger_service.load_ledger(
-        db, user_id=auth.user.id, connection=connection, country=record.country
+        db, user_id=user_id, connection=connection, country=record.country
     )
+    return {
+        "connection": connection,
+        "proposal": proposal,
+        "proposal_record": record,
+        "universe": analysis_service.load_config(),
+        "approval": approval,
+        "orders": orders,
+        "events": events,
+        "ledger": ledger,
+    }
 
+
+@router.get("/proposals/{proposal_id}", response_class=HTMLResponse)
+async def proposal_review(
+    request: Request,
+    proposal_id: int,
+    auth: AuthContext = Depends(require_user),
+    db: AsyncSession = Depends(get_db),
+) -> HTMLResponse:
+    """Show one proposal with its approval, orders, and timeline."""
+    context = await _review_context(
+        db, user_id=auth.user.id, proposal_id=proposal_id
+    )
     return templates.TemplateResponse(
         request,
         "proposal.html",
         {
             "user": auth.user,
             "csrf_token": auth.session.csrf_token,
-            "connection": connection,
-            "proposal": proposal,
-            "proposal_record": record,
-            "universe": analysis_service.load_config(),
-            "approval": approval,
-            "orders": orders,
-            "events": events,
-            "ledger": ledger,
+            **context,
             "approval_status": request.query_params.get("approval"),
             "run_status": request.query_params.get("run"),
             "message": request.query_params.get("message"),
             "iol_usage": call_budget.usage,
+        },
+    )
+
+
+@router.get("/proposals/{proposal_id}/export", response_class=HTMLResponse)
+async def proposal_export(
+    request: Request,
+    proposal_id: int,
+    auth: AuthContext = Depends(require_user),
+    db: AsyncSession = Depends(get_db),
+) -> HTMLResponse:
+    """Render one proposal as a printable document.
+
+    The page is self-contained and print-optimised so the browser can save it
+    as a PDF ("Export PDF", then "Save as PDF" in the print dialog). It shows
+    the same data as the review page and can only be read by the proposal's
+    owner.
+    """
+    context = await _review_context(
+        db, user_id=auth.user.id, proposal_id=proposal_id
+    )
+    return templates.TemplateResponse(
+        request,
+        "proposal_export.html",
+        {
+            "user": auth.user,
+            **context,
+            "generated_at": datetime.now(UTC),
         },
     )
 

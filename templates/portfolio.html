@@ -20,19 +20,18 @@
       <article class="stat">
         <span class="stat__label">Cash</span>
         <span class="stat__value">
-          {{ "%.2f" | format(portfolio.cash) if portfolio.cash is not none else "—" }}
-          <span class="muted">{{ portfolio.currency or "" }}</span>
+          {{ portfolio.cash | money(portfolio.currency) }}
         </span>
         <span class="stat__hint">From the last saved account status.</span>
       </article>
       <article class="stat">
         <span class="stat__label">Positions value</span>
-        <span class="stat__value">{{ "%.2f" | format(portfolio.positions_value) }}</span>
+        <span class="stat__value">{{ portfolio.positions_value | money(portfolio.currency) }}</span>
       </article>
       <article class="stat">
         <span class="stat__label">Total</span>
         <span class="stat__value">
-          {{ "%.2f" | format(portfolio.total_value) if portfolio.total_value is not none else "—" }}
+          {{ portfolio.total_value | money(portfolio.currency) }}
         </span>
       </article>
     </section>
@@ -58,11 +57,11 @@
           <td>{{ position.instrument.symbol or "—" }}</td>
           <td>{{ position.instrument.description or "—" }}</td>
           <td>{{ position.instrument.market or "—" }}</td>
-          <td class="num">{{ "%.2f" | format(position.total_quantity) if position.total_quantity is not none else "—" }}</td>
-          <td class="num">{{ "%.2f" | format(position.available_quantity) if position.available_quantity is not none else "—" }}</td>
-          <td class="num">{{ "%.2f" | format(position.last_price) if position.last_price is not none else "—" }}</td>
-          <td class="num">{{ "%.2f" | format(position.average_price) if position.average_price is not none else "—" }}</td>
-          <td class="num">{{ "%.2f" | format(position.market_value) if position.market_value is not none else "—" }}</td>
+          <td class="num">{{ position.total_quantity | number }}</td>
+          <td class="num">{{ position.available_quantity | number }}</td>
+          <td class="num">{{ position.last_price | money(portfolio.currency) }}</td>
+          <td class="num">{{ position.average_price | money(portfolio.currency) }}</td>
+          <td class="num">{{ position.market_value | money(portfolio.currency) }}</td>
         </tr>
         {% endfor %}
       </tbody>

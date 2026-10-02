@@ -24,11 +24,11 @@
       <dt>Username</dt><dd>{{ connection.username }}</dd>
       <dt>Password</dt><dd class="muted">stored encrypted &middot; never shown</dd>
       <dt>Country</dt><dd>{{ connection.country }}</dd>
-      <dt>Saved</dt><dd>{{ connection.created_at.strftime("%Y-%m-%d %H:%M UTC") }}</dd>
+      <dt>Saved</dt><dd>{{ connection.created_at | localtime }}</dd>
       <dt>Last used</dt>
       <dd>
         {% if connection.last_used_at %}
-          {{ connection.last_used_at.strftime("%Y-%m-%d %H:%M UTC") }}
+          {{ connection.last_used_at | localtime }}
         {% else %}
           <span class="muted">never</span>
         {% endif %}
@@ -38,7 +38,7 @@
         {% if connection.last_error %}
           {{ connection.last_error }}
           {% if connection.last_error_at %}
-            <span class="muted">({{ connection.last_error_at.strftime("%Y-%m-%d %H:%M UTC") }})</span>
+            <span class="muted">({{ connection.last_error_at | localtime }})</span>
           {% endif %}
         {% else %}
           <span class="muted">none</span>
@@ -64,7 +64,7 @@
       <dt>Profile</dt>
       <dd>
         {% if profile_snapshot %}
-          {{ profile_snapshot.fetched_at.strftime("%Y-%m-%d %H:%M UTC") }}
+          {{ profile_snapshot.fetched_at | localtime }}
           {% if profile_snapshot.is_stale %}<span class="badge badge--warn">stale</span>{% endif %}
         {% else %}
           <span class="muted">not fetched</span>
@@ -73,7 +73,7 @@
       <dt>Account status</dt>
       <dd>
         {% if account_snapshot %}
-          {{ account_snapshot.fetched_at.strftime("%Y-%m-%d %H:%M UTC") }}
+          {{ account_snapshot.fetched_at | localtime }}
           {% if account_snapshot.is_stale %}<span class="badge badge--warn">stale</span>{% endif %}
         {% else %}
           <span class="muted">not fetched</span>

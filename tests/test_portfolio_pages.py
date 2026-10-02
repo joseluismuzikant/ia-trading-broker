@@ -78,9 +78,9 @@ async def test_refreshing_the_portfolio_shows_positions_and_prices(
     assert "Grupo Financiero Galicia" in refreshed.text
     assert "YPFD" in refreshed.text
     # Total quantity, the free quantity, and the last price.
-    assert "100.00" in refreshed.text
-    assert "75.00" in refreshed.text
-    assert "1200.00" in refreshed.text
+    assert "100,00" in refreshed.text
+    assert "75,00" in refreshed.text
+    assert "1.200,00" in refreshed.text
     assert "source:" in refreshed.text
     assert "fetched" in refreshed.text
 
@@ -135,7 +135,7 @@ async def test_cash_and_total_use_the_saved_account_status(
     )
 
     # Cash 100.00 from the account status plus 18055.50 of positions.
-    assert "18155.50" in refreshed.text
+    assert "18.155,50" in refreshed.text
 
 
 # --- Countries are kept apart --------------------------------------------

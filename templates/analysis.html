@@ -1,9 +1,6 @@
 {% extends "base.html" %}
 {% block title %}Analysis &middot; ia-trading-broker{% endblock %}
 
-{% macro money(value) %}{{ value if value is not none else "—" }}{% endmacro %}
-{% macro number(value, places=2) %}{{ ("%." ~ places ~ "f") | format(value) if value is not none else "—" }}{% endmacro %}
-{% macro percent(value, places=2) %}{{ ("%." ~ places ~ "f") | format(value * 100) ~ "%" if value is not none else "—" }}{% endmacro %}
 
 {% block content %}
 <div class="page-head">
@@ -93,15 +90,15 @@
 <section class="grid grid--stats">
   <article class="stat">
     <span class="stat__label">Paper cash</span>
-    <span class="stat__value">{{ money(ledger.cash) }} <span class="muted">{{ ledger.currency or "" }}</span></span>
+    <span class="stat__value">{{ ledger.cash | money(ledger.currency) }}</span>
   </article>
   <article class="stat">
     <span class="stat__label">Positions value</span>
-    <span class="stat__value">{{ money(ledger.positions_value) }}</span>
+    <span class="stat__value">{{ ledger.positions_value | money(ledger.currency) }}</span>
   </article>
   <article class="stat">
     <span class="stat__label">Total</span>
-    <span class="stat__value">{{ money(ledger.total_value) }}</span>
+    <span class="stat__value">{{ ledger.total_value | money(ledger.currency) }}</span>
   </article>
 </section>
 
@@ -124,9 +121,9 @@
       <td>{{ position.symbol }}</td>
       <td>{{ position.market or "—" }}</td>
       <td class="num">{{ position.quantity }}</td>
-      <td class="num">{{ money(position.average_price) }}</td>
-      <td class="num">{{ money(position.last_price) }}</td>
-      <td class="num">{{ money(position.market_value) }}</td>
+      <td class="num">{{ position.average_price | money(position.currency or ledger.currency) }}</td>
+      <td class="num">{{ position.last_price | money(position.currency or ledger.currency) }}</td>
+      <td class="num">{{ position.market_value | money(position.currency or ledger.currency) }}</td>
     </tr>
     {% endfor %}
   </tbody>
@@ -152,10 +149,10 @@
   <dl class="kv">
     <dt>Approval mode</dt><dd>{{ proposal.approval_mode }}</dd>
     <dt>Execution mode</dt><dd>{{ proposal.execution_mode }}</dd>
-    <dt>Portfolio value</dt><dd>{{ money(proposal.portfolio_value) }} {{ proposal.currency or "" }}</dd>
-    <dt>Cash</dt><dd>{{ money(proposal.cash) }}</dd>
-    <dt>Turnover</dt><dd>{{ percent(proposal.turnover) }}</dd>
-    <dt>Created</dt><dd>{{ proposal.created_at.strftime("%Y-%m-%d %H:%M:%S UTC") if proposal.created_at else "—" }}</dd>
+    <dt>Portfolio value</dt><dd>{{ proposal.portfolio_value | money(proposal.currency) }}</dd>
+    <dt>Cash</dt><dd>{{ proposal.cash | money(proposal.currency) }}</dd>
+    <dt>Turnover</dt><dd>{{ proposal.turnover | percent }}</dd>
+    <dt>Created</dt><dd>{{ proposal.created_at | localtime if proposal.created_at else "—" }}</dd>
   </dl>
 
   <h3>Analysis funnel</h3>
@@ -208,7 +205,7 @@
         <td>{{ row.symbol }}</td>
         <td>{{ row.name }}</td>
         <td>{{ row.category }}</td>
-        <td class="num">{{ number(row.scan_score, 3) }}</td>
+        <td class="num">{{ row.scan_score | number(3) }}</td>
       </tr>
       {% endfor %}
     </tbody>
@@ -237,9 +234,9 @@
         <td>{{ row.symbol }}</td>
         <td>{{ row.name }}</td>
         <td>{{ row.category }}</td>
-        <td class="num">{{ number(row.technical_score, 3) }}</td>
-        <td class="num">{{ number(row.fundamental_score, 3) }}</td>
-        <td class="num">{{ number(row.combined_score, 3) }}</td>
+        <td class="num">{{ row.technical_score | number(3) }}</td>
+        <td class="num">{{ row.fundamental_score | number(3) }}</td>
+        <td class="num">{{ row.combined_score | number(3) }}</td>
         <td>{{ row.fundamental_summary }}</td>
       </tr>
       {% endfor %}
@@ -322,9 +319,9 @@
         {% endif %}
       </td>
       <td class="num">{{ item.quantity }}</td>
-      <td class="num">{{ money(item.limit_price) }}</td>
-      <td class="num">{{ money(item.notional) }}</td>
-      <td class="num">{{ percent(item.weight_after) }}</td>
+      <td class="num">{{ item.limit_price | money(proposal.currency) }}</td>
+      <td class="num">{{ item.notional | money(proposal.currency) }}</td>
+      <td class="num">{{ item.weight_after | percent }}</td>
       <td>{{ item.rationale }}</td>
     </tr>
     {% endfor %}
@@ -336,14 +333,14 @@
 <details class="card card--muted">
   <summary><strong>{{ item.symbol }}</strong> — {{ item.action }}, evidence and risk checks</summary>
   <dl class="kv">
-    <dt>Last price</dt><dd>{{ money(item.evidence.last_price) }}</dd>
-    <dt>EMA fast / slow</dt><dd>{{ number(item.evidence.ema_fast) }} / {{ number(item.evidence.ema_slow) }}</dd>
-    <dt>RSI</dt><dd>{{ number(item.evidence.rsi) }}</dd>
+    <dt>Last price</dt><dd>{{ item.evidence.last_price | money(proposal.currency) }}</dd>
+    <dt>EMA fast / slow</dt><dd>{{ item.evidence.ema_fast | number }} / {{ item.evidence.ema_slow | number }}</dd>
+    <dt>RSI</dt><dd>{{ item.evidence.rsi | number }}</dd>
     <dt>MACD / signal / histogram</dt>
-    <dd>{{ number(item.evidence.macd, 4) }} / {{ number(item.evidence.macd_signal, 4) }} / {{ number(item.evidence.macd_histogram, 4) }}</dd>
-    <dt>ATR</dt><dd>{{ number(item.evidence.atr) }}</dd>
-    <dt>Average volume</dt><dd>{{ number(item.evidence.average_volume, 0) }}</dd>
-    <dt>Return</dt><dd>{{ percent(item.evidence.return_fraction) }}</dd>
+    <dd>{{ item.evidence.macd | number(4) }} / {{ item.evidence.macd_signal | number(4) }} / {{ item.evidence.macd_histogram | number(4) }}</dd>
+    <dt>ATR</dt><dd>{{ item.evidence.atr | number }}</dd>
+    <dt>Average volume</dt><dd>{{ item.evidence.average_volume | number(0) }}</dd>
+    <dt>Return</dt><dd>{{ item.evidence.return_fraction | percent }}</dd>
     <dt>Observations</dt><dd>{{ item.evidence.observations }}</dd>
   </dl>
   <ul class="checks">
@@ -362,15 +359,15 @@
 <div class="table-wrap">
 <table class="table">
   <thead>
-    <tr><th>Id</th><th>Created</th><th>Status</th><th class="num">Turnover</th><th></th></tr>
+    <tr><th>Proposal ID</th><th>Created</th><th>Status</th><th class="num">Turnover</th><th></th></tr>
   </thead>
   <tbody>
     {% for record in proposals %}
     <tr>
       <td>{{ record.id }}</td>
-      <td>{{ record.created_at.strftime("%Y-%m-%d %H:%M:%S UTC") }}</td>
+      <td>{{ record.created_at | localtime }}</td>
       <td>{{ record.status }}</td>
-      <td class="num">{{ percent(record.payload.turnover) }}</td>
+      <td class="num">{{ record.payload.turnover | percent }}</td>
       <td>
         <a href="/analysis?connection_id={{ connection.id }}&country={{ country }}&proposal_id={{ record.id }}">View</a>
       </td>
