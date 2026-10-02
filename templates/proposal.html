@@ -1,20 +1,21 @@
 {% extends "base.html" %}
-{% block title %}Proposal {{ proposal_record.id }} &middot; ia-trading-broker{% endblock %}
+{% block title %}Proposal ID {{ proposal_record.id }} &middot; ia-trading-broker{% endblock %}
 
-{% macro money(value) %}{{ value if value is not none else "—" }}{% endmacro %}
-{% macro number(value, places=2) %}{{ ("%." ~ places ~ "f") | format(value) if value is not none else "—" }}{% endmacro %}
-{% macro percent(value, places=2) %}{{ ("%." ~ places ~ "f") | format(value * 100) ~ "%" if value is not none else "—" }}{% endmacro %}
 
 {% block content %}
 <div class="page-head">
-  <h1>Proposal {{ proposal_record.id }}</h1>
-  <p>
-    Saved plan for <strong>{{ connection.label }}</strong> ({{ connection.username }}).
+  <h1>Proposal ID {{ proposal_record.id }}</h1>
+  <div class="toolbar">
+    <p>
+      Saved plan for <strong>{{ connection.label }}</strong> ({{ connection.username }}).
     Review it, then approve or reject it. <strong>Paper mode only.</strong>
     {% if approval and approval.status == "pending" %}
-    It expires {{ approval.expires_at.strftime("%Y-%m-%d %H:%M UTC") }}.
+    It expires {{ approval.expires_at | localtime }}.
     {% endif %}
-  </p>
+    </p>
+    <a class="button button--ghost" target="_blank" rel="noopener"
+       href="/proposals/{{ proposal_record.id }}/export">Export PDF</a>
+  </div>
 </div>
 
 {% if approval_status == "ok" %}
@@ -45,10 +46,10 @@
   <dl class="kv">
     <dt>Approval mode</dt><dd>{{ proposal.approval_mode }}</dd>
     <dt>Execution mode</dt><dd>{{ proposal.execution_mode }}</dd>
-    <dt>Portfolio value</dt><dd>{{ money(proposal.portfolio_value) }} {{ proposal.currency or "" }}</dd>
-    <dt>Cash at plan time</dt><dd>{{ money(proposal.cash) }}</dd>
-    <dt>Turnover</dt><dd>{{ percent(proposal.turnover) }}</dd>
-    <dt>Created</dt><dd>{{ proposal_record.created_at.strftime("%Y-%m-%d %H:%M:%S UTC") }}</dd>
+    <dt>Portfolio value</dt><dd>{{ proposal.portfolio_value | money(proposal.currency) }}</dd>
+    <dt>Cash at plan time</dt><dd>{{ proposal.cash | money(proposal.currency) }}</dd>
+    <dt>Turnover</dt><dd>{{ proposal.turnover | percent }}</dd>
+    <dt>Created</dt><dd>{{ proposal_record.created_at | localtime }}</dd>
   </dl>
 
   <h3>Analysis funnel</h3>
@@ -101,7 +102,7 @@
         <td>{{ row.symbol }}</td>
         <td>{{ row.name }}</td>
         <td>{{ row.category }}</td>
-        <td class="num">{{ number(row.scan_score, 3) }}</td>
+        <td class="num">{{ row.scan_score | number(3) }}</td>
       </tr>
       {% endfor %}
     </tbody>
@@ -130,9 +131,9 @@
         <td>{{ row.symbol }}</td>
         <td>{{ row.name }}</td>
         <td>{{ row.category }}</td>
-        <td class="num">{{ number(row.technical_score, 3) }}</td>
-        <td class="num">{{ number(row.fundamental_score, 3) }}</td>
-        <td class="num">{{ number(row.combined_score, 3) }}</td>
+        <td class="num">{{ row.technical_score | number(3) }}</td>
+        <td class="num">{{ row.fundamental_score | number(3) }}</td>
+        <td class="num">{{ row.combined_score | number(3) }}</td>
         <td>{{ row.fundamental_summary }}</td>
       </tr>
       {% endfor %}
@@ -184,11 +185,11 @@
 <section class="card card--muted">
   <dl class="kv">
     <dt>Decision</dt><dd>{{ approval.status }}</dd>
-    <dt>Requested</dt><dd>{{ approval.requested_at.strftime("%Y-%m-%d %H:%M UTC") }}</dd>
+    <dt>Requested</dt><dd>{{ approval.requested_at | localtime }}</dd>
     <dt>Decided</dt>
-    <dd>{{ approval.decided_at.strftime("%Y-%m-%d %H:%M UTC") if approval.decided_at else "—" }}</dd>
+    <dd>{{ approval.decided_at | localtime if approval.decided_at else "—" }}</dd>
     <dt>Used</dt>
-    <dd>{{ approval.used_at.strftime("%Y-%m-%d %H:%M UTC") if approval.used_at else "—" }}</dd>
+    <dd>{{ approval.used_at | localtime if approval.used_at else "—" }}</dd>
     {% if approval.reason %}<dt>Reason</dt><dd>{{ approval.reason }}</dd>{% endif %}
   </dl>
 </section>
@@ -219,9 +220,9 @@
         {% endif %}
       </td>
       <td class="num">{{ item.quantity }}</td>
-      <td class="num">{{ money(item.limit_price) }}</td>
-      <td class="num">{{ money(item.notional) }}</td>
-      <td class="num">{{ percent(item.weight_after) }}</td>
+      <td class="num">{{ item.limit_price | money(proposal.currency) }}</td>
+      <td class="num">{{ item.notional | money(proposal.currency) }}</td>
+      <td class="num">{{ item.weight_after | percent }}</td>
       <td>{{ item.rationale }}</td>
     </tr>
     {% endfor %}
@@ -237,7 +238,7 @@
 <table class="table">
   <thead>
     <tr>
-      <th>Id</th>
+      <th>Order ID</th>
       <th>Symbol</th>
       <th>Side</th>
       <th class="num">Quantity</th>
@@ -276,7 +277,7 @@
 <ul class="checks">
   {% for event in events %}
   <li>
-    <span class="muted">{{ event.created_at.strftime("%Y-%m-%d %H:%M:%S UTC") }}</span>
+    <span class="muted">{{ event.created_at | localtime }}</span>
     <strong>{{ event.category }}/{{ event.event_type }}</strong>
     — {{ event.message }}
   </li>

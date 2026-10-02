@@ -471,7 +471,7 @@ async def test_refreshing_the_account_status_shows_the_balances(
 
     assert refreshed.status_code == 200
     assert "Refreshed from IOL" in refreshed.text
-    assert "200.00" in refreshed.text
+    assert "200,00 ARS" in refreshed.text
     assert "Peso_Argentino" in refreshed.text
 
 
@@ -496,7 +496,7 @@ async def test_a_failed_account_status_refresh_is_marked_stale(
     )
 
     assert "stale" in stale.text
-    assert "200.00" in stale.text
+    assert "200,00 ARS" in stale.text
 
 
 # --- Log hygiene ----------------------------------------------------------
@@ -537,3 +537,32 @@ async def test_no_password_or_token_reaches_the_logs(
     assert fake_iol.password not in logs
     for token in fake_iol.issued_tokens:
         assert token not in logs
+
+
+async def test_the_navigation_keeps_profile_between_history_and_help(
+    client, make_user, password: str
+) -> None:
+    await logged_in_user(client, make_user, password)
+
+    page = await client.get("/dashboard")
+    nav = page.text.split('<nav class="nav"')[1].split("</nav>")[0]
+
+    # The connections tab is gone and the profile tab is renamed and moved.
+    assert "Connections" not in nav
+    assert "IOL profile" not in nav
+    assert nav.index("History") < nav.index("Profile") < nav.index("Help")
+
+
+async def test_the_profile_page_shows_the_connections(
+    client, make_user, password: str, fake_iol
+) -> None:
+    # Connection management lives on the Profile page now.
+    await logged_in_user(client, make_user, password)
+    await create_connection(client, label="My IOL account")
+
+    page = await client.get("/profile")
+
+    assert page.status_code == 200
+    assert "Broker connections" in page.text
+    assert "Add a connection" in page.text
+    assert "My IOL account" in page.text

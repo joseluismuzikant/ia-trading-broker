@@ -237,3 +237,67 @@ async def test_another_user_cannot_open_the_review(
         response = await bob.get(f"/proposals/{proposal_id}", follow_redirects=False)
 
     assert response.status_code == 404
+
+
+# --- PDF export and the identifier wording --------------------------------
+
+
+async def test_the_review_page_names_the_identifier_and_offers_an_export(
+    client, db_session, make_user, password, fake_iol
+) -> None:
+    _user, connection = await _setup(
+        client, db_session, make_user, password, fake_iol
+    )
+    proposal_id = await _run_analysis(client, connection)
+
+    response = await client.get(f"/proposals/{proposal_id}")
+
+    assert response.status_code == 200
+    # The number of the plan is named as an identifier.
+    assert f"Proposal ID {proposal_id}" in response.text
+    assert "Export PDF" in response.text
+    assert f'href="/proposals/{proposal_id}/export"' in response.text
+
+
+async def test_the_pdf_export_renders_the_whole_analysis(
+    client, db_session, make_user, password, fake_iol
+) -> None:
+    _user, connection = await _setup(
+        client, db_session, make_user, password, fake_iol
+    )
+    proposal_id = await _run_analysis(client, connection)
+
+    response = await client.get(f"/proposals/{proposal_id}/export")
+
+    assert response.status_code == 200
+    assert f"Proposal ID {proposal_id}" in response.text
+    assert "Key figures" in response.text
+    assert "Plan risk checks" in response.text
+    assert "Analysis funnel" in response.text
+    assert "Plan" in response.text
+    # The document prints itself, and it prints without the site chrome.
+    assert "window.print()" in response.text
+    assert "Save as PDF" in response.text
+    assert 'class="nav"' not in response.text
+    # Money and timestamps are formatted for a local reader.
+    assert " ARS" in response.text
+    assert "UTC-3" in response.text
+    assert "99.895" not in response.text or "," in response.text
+
+
+async def test_the_pdf_export_is_private_to_the_proposal_owner(
+    client, db_session, make_user, password, fake_iol
+) -> None:
+    _user, connection = await _setup(
+        client, db_session, make_user, password, fake_iol
+    )
+    proposal_id = await _run_analysis(client, connection)
+
+    await make_user("mallory", password)
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://testserver"
+    ) as mallory:
+        await login(mallory, "mallory", password)
+        response = await mallory.get(f"/proposals/{proposal_id}/export")
+
+    assert response.status_code == 404

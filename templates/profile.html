@@ -1,10 +1,10 @@
 {% extends "base.html" %}
-{% block title %}IOL profile &middot; ia-trading-broker{% endblock %}
+{% block title %}Profile &middot; ia-trading-broker{% endblock %}
 
 {% block content %}
 <div class="page-head">
-  <h1>My IOL profile</h1>
-  <p>The identity and investor profile IOL reports for this account.</p>
+  <h1>Profile</h1>
+  <p>The identity IOL reports for this account, and the saved broker connections.</p>
 </div>
 
 {% if not connection %}
@@ -17,7 +17,7 @@
 
   {% if profile %}
   <div class="card">
-    <h2>Profile</h2>
+    <h2>IOL identity</h2>
     <dl class="kv">
       <dt>Name</dt><dd>{{ profile.full_name }}</dd>
       <dt>Account number</dt><dd>{{ profile.numero_cuenta or "—" }}</dd>
@@ -34,4 +34,9 @@
   </p>
   {% endif %}
 {% endif %}
+
+<section class="card">
+  <h2>Broker connections</h2>
+  {% include "_connections.html" %}
+</section>
 {% endblock %}

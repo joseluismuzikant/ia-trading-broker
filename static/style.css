@@ -972,3 +972,37 @@ details.card[open] > summary {
     transition: none !important;
   }
 }
+
+/* Printing: keep the content, drop the chrome. The proposal export page has
+   its own print styles because it is a standalone document. */
+@media print {
+  .site-header,
+  .site-footer,
+  .skip-link,
+  .actions,
+  .inline-form,
+  .toolbar form,
+  .button {
+    display: none !important;
+  }
+
+  body {
+    background: #fff;
+    color: #000;
+  }
+
+  .card,
+  .table,
+  .alert {
+    border-color: #999;
+    break-inside: avoid;
+  }
+
+  thead {
+    display: table-header-group;
+  }
+
+  tr {
+    break-inside: avoid;
+  }
+}

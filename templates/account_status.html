@@ -19,8 +19,7 @@
     <div class="card">
       <h2>Total</h2>
       <p class="total">
-        {{ "%.2f" | format(account.total_en_pesos) if account.total_en_pesos is not none else "—" }}
-        <span class="muted">ARS</span>
+        {{ account.total_en_pesos | money("ARS") }}
       </p>
     </div>
 
@@ -46,11 +45,11 @@
           <td>{{ item.numero or "—" }}</td>
           <td>{{ item.tipo or "—" }}</td>
           <td>{{ item.moneda or "—" }}</td>
-          <td class="num">{{ "%.2f" | format(item.disponible) if item.disponible is not none else "—" }}</td>
-          <td class="num">{{ "%.2f" | format(item.comprometido) if item.comprometido is not none else "—" }}</td>
-          <td class="num">{{ "%.2f" | format(item.saldo) if item.saldo is not none else "—" }}</td>
-          <td class="num">{{ "%.2f" | format(item.titulos_valorizados) if item.titulos_valorizados is not none else "—" }}</td>
-          <td class="num">{{ "%.2f" | format(item.total) if item.total is not none else "—" }}</td>
+          <td class="num">{{ item.disponible | money(item.moneda) }}</td>
+          <td class="num">{{ item.comprometido | money(item.moneda) }}</td>
+          <td class="num">{{ item.saldo | money(item.moneda) }}</td>
+          <td class="num">{{ item.titulos_valorizados | money(item.moneda) }}</td>
+          <td class="num">{{ item.total | money(item.moneda) }}</td>
           <td>{{ item.estado or "—" }}</td>
         </tr>
         {% endfor %}

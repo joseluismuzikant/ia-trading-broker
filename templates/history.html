@@ -45,8 +45,8 @@
 <table class="table">
   <thead>
     <tr>
-      <th>Id</th>
-      <th>Proposal</th>
+      <th>Order ID</th>
+      <th>Proposal ID</th>
       <th>Symbol</th>
       <th>Side</th>
       <th class="num">Quantity</th>
@@ -67,13 +67,13 @@
       <td>{{ record.symbol }}</td>
       <td>{{ record.side }}</td>
       <td class="num">{{ record.payload.quantity }}</td>
-      <td class="num">{{ record.payload.limit_price }}</td>
+      <td class="num">{{ record.payload.limit_price | money }}</td>
       <td>
         <span class="badge {{ 'badge--ok' if record.status == 'filled' else 'badge--warn' }}">
           {{ record.status }}
         </span>
       </td>
-      <td>{{ record.created_at.strftime("%Y-%m-%d %H:%M:%S UTC") }}</td>
+      <td>{{ record.created_at | localtime }}</td>
     </tr>
     {% endfor %}
   </tbody>
@@ -92,14 +92,14 @@
       <th>When</th>
       <th>Category</th>
       <th>Event</th>
-      <th>Proposal</th>
+      <th>Proposal ID</th>
       <th>Message</th>
     </tr>
   </thead>
   <tbody>
     {% for event in events %}
     <tr>
-      <td>{{ event.created_at.strftime("%Y-%m-%d %H:%M:%S UTC") }}</td>
+      <td>{{ event.created_at | localtime }}</td>
       <td>{{ event.category }}</td>
       <td>{{ event.event_type }}</td>
       <td>

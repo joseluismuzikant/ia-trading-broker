@@ -268,7 +268,7 @@ def build_graph(
         await _record(
             EVENT_PROPOSAL,
             "proposal.created",
-            f"Proposal {record.id} saved with {len(proposal.orders)} order(s) "
+            f"Proposal ID {record.id} saved with {len(proposal.orders)} order(s) "
             f"from {len(proposal.finalists)} finalists.",
             proposal_id=record.id,
             mode=proposal.approval_mode,

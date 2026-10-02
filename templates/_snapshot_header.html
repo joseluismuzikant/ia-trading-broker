@@ -56,7 +56,7 @@
   <p class="snapshot-meta">
     {% if snapshot %}
       source: <strong>IOL</strong> &middot;
-      fetched <time>{{ snapshot.fetched_at.strftime("%Y-%m-%d %H:%M:%S UTC") }}</time>
+      fetched <time>{{ snapshot.fetched_at | localtime }}</time>
       {% if snapshot.is_stale %}
         <span class="badge badge--warn">stale</span>
       {% else %}
@@ -94,8 +94,8 @@
 <p class="alert alert--warn">
   This data is stale.
   {% if snapshot.stale_since %}
-    Last successful read {{ snapshot.fetched_at.strftime("%Y-%m-%d %H:%M UTC") }},
-    marked stale on {{ snapshot.stale_since.strftime("%Y-%m-%d %H:%M UTC") }}.
+    Last successful read {{ snapshot.fetched_at | localtime }},
+    marked stale on {{ snapshot.stale_since | localtime }}.
   {% endif %}
   {% if snapshot.error %}<br /><span class="muted">{{ snapshot.error }}</span>{% endif %}
 </p>
