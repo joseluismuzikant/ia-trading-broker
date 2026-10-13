@@ -1,0 +1,80 @@
+{% extends "base.html" %}
+{% block title %}Country portfolio &middot; ia-trading-broker{% endblock %}
+
+{% block content %}
+<div class="page-head">
+  <h1>Country portfolio</h1>
+  <p>Positions read from IOL for one country and saved as a snapshot.</p>
+</div>
+
+{% if not connection %}
+<p class="alert alert--info">
+  No broker connection yet. <a href="/connections/new">Add one</a> to read your
+  country portfolio.
+</p>
+{% else %}
+  {% include "_snapshot_header.html" %}
+
+  {% if portfolio %}
+    <section class="grid grid--stats">
+      <article class="stat">
+        <span class="stat__label">Cash</span>
+        <span class="stat__value">
+          {{ portfolio.cash | money(portfolio.currency) }}
+        </span>
+        <span class="stat__hint">From the last saved account status.</span>
+      </article>
+      <article class="stat">
+        <span class="stat__label">Positions value</span>
+        <span class="stat__value">{{ portfolio.positions_value | money(portfolio.currency) }}</span>
+      </article>
+      <article class="stat">
+        <span class="stat__label">Total</span>
+        <span class="stat__value">
+          {{ portfolio.total_value | money(portfolio.currency) }}
+        </span>
+      </article>
+    </section>
+
+    {% if portfolio.positions %}
+    <div class="table-wrap">
+    <table class="table">
+      <thead>
+        <tr>
+          <th>Symbol</th>
+          <th>Description</th>
+          <th>Market</th>
+          <th class="num">Quantity</th>
+          <th class="num">Available</th>
+          <th class="num">Last price</th>
+          <th class="num">Average price</th>
+          <th class="num">Value</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for position in portfolio.positions %}
+        <tr>
+          <td>{{ position.instrument.symbol or "—" }}</td>
+          <td>{{ position.instrument.description or "—" }}</td>
+          <td>{{ position.instrument.market or "—" }}</td>
+          <td class="num">{{ position.total_quantity | number }}</td>
+          <td class="num">{{ position.available_quantity | number }}</td>
+          <td class="num">{{ position.last_price | money(portfolio.currency) }}</td>
+          <td class="num">{{ position.average_price | money(portfolio.currency) }}</td>
+          <td class="num">{{ position.market_value | money(portfolio.currency) }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    </div>
+    {% else %}
+    <p class="alert alert--info">The broker returned no positions for this country.</p>
+    {% endif %}
+  {% elif not snapshot %}
+  <p class="alert alert--info">
+    Nothing saved yet for this country. Use <strong>Refresh from IOL</strong> to
+    read it now.
+  </p>
+  {% endif %}
+{% endif %}
+{% endblock %}

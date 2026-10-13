@@ -1,0 +1,15 @@
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+extend-exclude = [".venv", "static"]
+
+[tool.ruff.lint]
+# Pyflakes, pycodestyle errors, import order, pyupgrade, bugbear.
+select = ["E", "F", "I", "UP", "B"]
+ignore = [
+    "B008",  # FastAPI Depends() in argument defaults
+    "E501",  # the formatter wraps code; long strings and comments are left alone
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["B017"]  # a broad pytest.raises(Exception) is deliberate in a few tests

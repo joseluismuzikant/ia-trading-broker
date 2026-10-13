@@ -1,0 +1,61 @@
+{# Broker connections: the entry point to add one plus the table of saved
+   logins. Shared by the Profile page and the standalone connections page.
+   Expects: connections, csrf_token. #}
+<div class="toolbar">
+  <span class="muted">Saved IOL logins &mdash; the password is stored encrypted
+    and never shown again.</span>
+  <a class="button" href="/connections/new">Add a connection</a>
+</div>
+
+{% if connections %}
+<div class="table-wrap">
+<table class="table">
+  <thead>
+    <tr>
+      <th>Label</th>
+      <th>Broker</th>
+      <th>Username</th>
+      <th>Country</th>
+      <th>Last used</th>
+      <th>Last error</th>
+      <th></th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for connection in connections %}
+    <tr>
+      <td><a href="/connections/{{ connection.id }}">{{ connection.label }}</a></td>
+      <td>{{ connection.broker }}</td>
+      <td>{{ connection.username }}</td>
+      <td>{{ connection.country }}</td>
+      <td>
+        {% if connection.last_used_at %}
+          {{ connection.last_used_at | localtime }}
+        {% else %}
+          <span class="muted">never</span>
+        {% endif %}
+      </td>
+      <td>
+        {% if connection.last_error %}
+          <span class="badge badge--danger">error</span>
+          <span class="muted">{{ connection.last_error }}</span>
+        {% else %}
+          <span class="muted">—</span>
+        {% endif %}
+      </td>
+      <td>
+        <form method="post" action="/connections/{{ connection.id }}/test" class="inline-form">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+          <button type="submit" class="button button--ghost">Test</button>
+        </form>
+      </td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+</div>
+{% else %}
+<p class="alert alert--info">
+  No connection yet. Add your IOL login to read your profile and account status.
+</p>
+{% endif %}

@@ -1,0 +1,61 @@
+{# Current versus target allocation, as the analysis page, the review page and
+   the PDF export show it. Expects: proposal. Degrades gracefully when an old
+   proposal predates the model allocation. #}
+<h3>Current vs target allocation</h3>
+{% if proposal.advice %}
+<p class="muted">
+  Model target allocation &middot; {{ proposal.advice.model_label }} &middot;
+  {{ proposal.advice.model_provider }} / {{ proposal.advice.model_name }} &middot;
+  {{ proposal.advice.analysis_version }}
+</p>
+<div class="table-wrap">
+<table class="table">
+  <thead>
+    <tr>
+      <th>Asset</th>
+      <th class="num">Current %</th>
+      <th class="num">Target %</th>
+      <th class="num">Change</th>
+      <th>Action</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for row in proposal.advice.decisions %}
+    {% set change = row.target_weight - row.current_weight %}
+    <tr>
+      <td>{{ row.symbol }} <span class="muted">{{ row.name }}</span></td>
+      <td class="num">{{ row.current_weight | percent }}</td>
+      <td class="num">{{ row.target_weight | percent }}</td>
+      <td class="num">{{ "%+.1f%%" | format(change * 100) }}</td>
+      <td>
+        <span class="badge {% if row.action == 'BUY' %}badge--ok{% elif row.action == 'SELL' %}badge--danger{% else %}badge--muted{% endif %}">
+          {{ row.action }}
+        </span>
+      </td>
+    </tr>
+    {% endfor %}
+    {% if proposal.advice.current_cash_weight is not none %}
+    {% set cash_change = proposal.advice.target_cash_weight - proposal.advice.current_cash_weight %}
+    {% else %}
+    {% set cash_change = none %}
+    {% endif %}
+    <tr>
+      <td><strong>Cash</strong></td>
+      <td class="num">
+        {{ proposal.advice.current_cash_weight | percent if proposal.advice.current_cash_weight is not none else "—" }}
+      </td>
+      <td class="num">{{ proposal.advice.target_cash_weight | percent }}</td>
+      <td class="num">
+        {{ "%+.1f%%" | format(cash_change * 100) if cash_change is not none else "—" }}
+      </td>
+      <td class="muted">the share kept in cash</td>
+    </tr>
+  </tbody>
+</table>
+</div>
+{% else %}
+<p class="alert alert--info">
+  This proposal predates the model allocation. Its trades are shown below from
+  the saved plan.
+</p>
+{% endif %}

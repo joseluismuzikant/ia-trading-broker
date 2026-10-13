@@ -1,0 +1,640 @@
+{% extends "base.html" %}
+{% block title %}Proposal #{{ proposal_record.id }} &middot; ia-trading-broker{% endblock %}
+
+
+{% block content %}
+<div class="page-head">
+  <h1>Proposal #{{ proposal_record.id }}</h1>
+  <div class="toolbar">
+    <p>
+      <span class="badge {% if proposal_record.status == 'approved' %}badge--ok{% elif proposal_record.status == 'pending_review' %}badge--warn{% else %}badge--muted{% endif %}">
+        {{ proposal_record.status | status_label }}
+      </span>
+      {% if proposal.execution_mode == 'LIVE' %}
+      <span class="badge badge--danger" title="Orders are sent to the real broker.">LIVE TRADING</span>
+      {% endif %}
+      &middot; Created {{ proposal_record.created_at | localtime }}
+      {% if model_label %}&middot; Model: <strong>{{ model_label }}</strong>{% endif %}
+      &middot; Portfolio value: <strong>{{ proposal.portfolio_value | money(proposal.currency) }}</strong>
+      &middot; {{ connection.label }} ({{ connection.username }})
+    </p>
+    <div class="actions" style="margin: 0;">
+      <a class="button button--ghost" target="_blank" rel="noopener"
+         href="/proposals/{{ proposal_record.id }}/export">Export PDF</a>
+      {% if deletable %}
+      <form method="post" action="/proposals/{{ proposal_record.id }}/delete"
+            class="inline-form"
+            onsubmit="return confirm('Delete Proposal #{{ proposal_record.id }}? This cannot be undone.');">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+        <button type="submit" class="button button--ghost">Delete</button>
+      </form>
+      {% endif %}
+    </div>
+  </div>
+</div>
+
+{% include "_progress.html" %}
+
+{% if approval_status == "ok" %}
+<p class="alert alert--ok">
+  Approved. Run status: <strong>{{ run_status }}</strong>.
+  {% if run_status == "blocked" %}
+  Nothing was executed &mdash; read the timeline for the reason.
+  {% endif %}
+</p>
+{% elif approval_status == "rejected" %}
+<p class="alert alert--info">Rejected. Nothing was sent to the broker.</p>
+{% elif approval_status == "error" %}
+<p class="alert alert--error">{{ message or "The decision could not be saved." }}</p>
+{% endif %}
+
+<section class="card">
+  {% include "_advice.html" %}
+</section>
+
+<h2>Trades to execute</h2>
+{% set decided = approval and approval.status in ("approved", "consumed") %}
+{% set blocked = proposal.recommendations | selectattr('executable', 'equalto', false) | list %}
+{% set holds = proposal.recommendations | selectattr('action', 'equalto', 'HOLD') | list %}
+{% if not sells and not buys and not blocked %}
+<p class="alert alert--info">This plan proposes no trades.</p>
+{% else %}
+
+{% if sells %}
+<h3>Sells</h3>
+<div class="table-wrap">
+<table class="table">
+  <thead>
+    <tr>
+      <th>Symbol</th>
+      <th class="num">Suggested quantity</th>
+      <th class="num">Estimated price</th>
+      <th class="num">Estimated notional</th>
+      <th>Status</th>
+      <th>Execute</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for item in sells %}
+    {% set row = latest_by_trade.get(item.symbol ~ ':' ~ item.action) %}
+    {% set in_flight = row and row.status in ('prepared', 'submitted', 'accepted', 'unknown', 'partially_filled') %}
+    {% set done = row and row.status == 'filled' %}
+    <tr>
+      <td>
+        {{ item.symbol }} <span class="muted">{{ item.name }}</span>
+        {% if item.quotation_factor > 1 %}<span class="muted">(qty in nominales)</span>{% endif %}
+      </td>
+      <td class="num">{{ item.quantity | int }}</td>
+      <td class="num">
+        {{ item.limit_price | money(proposal.currency) if item.limit_price else "—" }}
+        {% if item.quotation_factor > 1 %}<span class="muted">per 100</span>{% endif %}
+      </td>
+      <td class="num">{{ item.notional | money(proposal.currency) if item.notional else "—" }}</td>
+      <td>
+        {% if row %}
+        <span class="badge {% if done %}badge--ok{% elif row.status in ('rejected', 'unknown') %}badge--danger{% else %}badge--warn{% endif %}">
+          {{ row.status | order_status_label }}
+        </span>
+        {% if row.broker_order_id %}<span class="muted">#{{ row.broker_order_id }}</span>{% endif %}
+        {% else %}<span class="badge badge--muted">NOT SENT</span>{% endif %}
+      </td>
+      <td>
+        {% if in_flight or done %}
+        <span class="muted">
+          {{ "already sent" if in_flight else "executed" }}
+        </span>
+        {% elif not decided %}
+        <span class="muted">approve the plan first</span>
+        {% else %}
+        <form method="post" action="/proposals/{{ proposal_record.id }}/execute" class="inline-form">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+          <input type="hidden" name="symbol" value="{{ item.symbol }}" />
+          <input type="hidden" name="side" value="{{ item.action }}" />
+          <label class="field__label" for="qty-sell-{{ item.symbol }}">Qty</label>
+          <input class="field__input" style="width:6rem" type="number" min="1" step="1"
+                 id="qty-sell-{{ item.symbol }}" name="quantity"
+                 value="{{ item.quantity | int }}" />
+          <button type="submit" class="button button--ghost"
+                  title="Send this trade to IOL at the quantity shown.">
+            {{ "Retry" if row else "Execute" }}
+          </button>
+        </form>
+        {% endif %}
+      </td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+</div>
+{% endif %}
+
+{% if buys %}
+<h3>Buys</h3>
+<p class="muted">
+  Available cash at IOL:
+  <strong>{{ cash_available | money(proposal.currency) if cash_available is not none else "unknown" }}</strong>.
+  A purchase is only executable if this cash covers it; a sale that has not
+  settled funds nothing.
+</p>
+<div class="table-wrap">
+<table class="table">
+  <thead>
+    <tr>
+      <th>Symbol</th>
+      <th class="num">Suggested quantity</th>
+      <th class="num">Estimated price</th>
+      <th class="num">Estimated notional</th>
+      <th>Status</th>
+      <th>Execute</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for item in buys %}
+    {% set row = latest_by_trade.get(item.symbol ~ ':' ~ item.action) %}
+    {% set in_flight = row and row.status in ('prepared', 'submitted', 'accepted', 'unknown', 'partially_filled') %}
+    {% set done = row and row.status == 'filled' %}
+    <tr>
+      <td>
+        {{ item.symbol }} <span class="muted">{{ item.name }}</span>
+        {% if item.quotation_factor > 1 %}<span class="muted">(qty in nominales)</span>{% endif %}
+      </td>
+      <td class="num">{{ item.quantity | int }}</td>
+      <td class="num">
+        {{ item.limit_price | money(proposal.currency) if item.limit_price else "—" }}
+        {% if item.quotation_factor > 1 %}<span class="muted">per 100</span>{% endif %}
+      </td>
+      <td class="num">{{ item.notional | money(proposal.currency) if item.notional else "—" }}</td>
+      <td>
+        {% if row %}
+        <span class="badge {% if done %}badge--ok{% elif row.status in ('rejected', 'unknown') %}badge--danger{% else %}badge--warn{% endif %}">
+          {{ row.status | order_status_label }}
+        </span>
+        {% if row.broker_order_id %}<span class="muted">#{{ row.broker_order_id }}</span>{% endif %}
+        {% else %}<span class="badge badge--muted">NOT SENT</span>{% endif %}
+      </td>
+      <td>
+        {% if in_flight or done %}
+        <span class="muted">
+          {{ "already sent" if in_flight else "executed" }}
+        </span>
+        {% elif not decided %}
+        <span class="muted">approve the plan first</span>
+        {% else %}
+        <form method="post" action="/proposals/{{ proposal_record.id }}/execute" class="inline-form">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+          <input type="hidden" name="symbol" value="{{ item.symbol }}" />
+          <input type="hidden" name="side" value="{{ item.action }}" />
+          <label class="field__label" for="qty-buy-{{ item.symbol }}">Qty</label>
+          <input class="field__input" style="width:6rem" type="number" min="1" step="1"
+                 id="qty-buy-{{ item.symbol }}" name="quantity"
+                 value="{{ item.quantity | int }}" />
+          <button type="submit" class="button button--ghost"
+                  title="Send this trade to IOL at the quantity shown.">
+            {{ "Retry" if row else "Execute" }}
+          </button>
+        </form>
+        {% endif %}
+      </td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+</div>
+{% endif %}
+
+{% if blocked %}
+{% set cap = universe.constraints.max_single_position_pct %}
+<h3>Not executable <span class="badge badge--danger">{{ blocked | length }}</span></h3>
+<p class="muted">
+  The model asked for these trades, but a whole-unit order cannot be sized for
+  them. Nothing is submitted for them; their target value simply stays as cash.
+</p>
+<div class="table-wrap">
+<table class="table">
+  <thead>
+    <tr>
+      <th>Symbol</th>
+      <th class="num">Model wants</th>
+      <th class="num">One unit costs</th>
+      <th class="num">One unit is</th>
+      <th>Why it was skipped</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for item in blocked %}
+    {% set unit_share = (item.unit_cost.amount / proposal.portfolio_value.amount) | float
+       if item.unit_cost and proposal.portfolio_value.amount else none %}
+    <tr>
+      <td>{{ item.symbol }}<br /><span class="muted">{{ item.name }}</span></td>
+      <td class="num">{{ item.target_weight | percent if item.target_weight is not none else "—" }}</td>
+      <td class="num">
+        {{ item.unit_cost | money(proposal.currency) if item.unit_cost else "—" }}
+      </td>
+      <td class="num">
+        {% if unit_share is not none %}
+        {{ unit_share | percent }} of the portfolio
+        {% if unit_share > (cap | float) %}
+        <br /><span class="badge badge--warn">above the {{ cap | percent }} position limit</span>
+        {% endif %}
+        {% else %}—{% endif %}
+      </td>
+      <td>
+        <span class="badge badge--danger">NOT EXECUTABLE</span><br />
+        {{ item.reason or "cannot be sized into a whole-unit order" }}
+      </td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+</div>
+<p class="alert alert--info">
+  <strong>What you can do.</strong>
+  Run a new analysis (the model is now told what one unit costs, so it can
+  avoid weights that cannot be filled), pick an instrument whose unit is a
+  small share of the portfolio, or add cash to the account. Positions exist
+  only in whole units, so an instrument costing more than the position limit
+  can never be bought.
+</p>
+{% endif %}
+
+{% if holds %}
+<h3>Holds</h3>
+<p class="muted">
+  No transaction is needed for these positions.
+</p>
+<div class="table-wrap">
+<table class="table">
+  <thead>
+    <tr><th>Symbol</th><th class="num">Target allocation</th><th>Note</th></tr>
+  </thead>
+  <tbody>
+    {% for item in holds %}
+    <tr>
+      <td>{{ item.symbol }} <span class="muted">{{ item.name }}</span></td>
+      <td class="num">{{ item.target_weight | percent if item.target_weight is not none else "—" }}</td>
+      <td class="muted">{{ item.reason or "already at the target" }}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+</div>
+{% endif %}
+{% endif %}
+
+<h2>Cash summary</h2>
+<dl class="kv">
+  <dt>Current cash</dt><dd>{{ proposal.cash | money(proposal.currency) }}</dd>
+  <dt>Estimated proceeds from sells</dt><dd>{{ sell_proceeds | money(proposal.currency) }}</dd>
+  <dt>Estimated purchases</dt><dd>{{ buy_cost | money(proposal.currency) }}</dd>
+  <dt>Estimated cash after rebalance</dt><dd><strong>{{ cash_after | money(proposal.currency) }}</strong></dd>
+</dl>
+
+<h2>AI summary</h2>
+<p>{{ proposal.advice.summary if proposal.advice else proposal.summary }}</p>
+
+<h2>Main risks</h2>
+{% set risk_lines = [] %}
+{% if proposal.advice %}
+  {% for row in proposal.advice.decisions %}
+    {% for risk in row.risks %}
+      {% if risk %}{% set _ = risk_lines.append(row.symbol ~ ": " ~ risk) %}{% endif %}
+    {% endfor %}
+  {% endfor %}
+{% endif %}
+{% if proposal.warnings %}
+  {% for warning in proposal.warnings %}
+    {% set _ = risk_lines.append(warning) %}
+  {% endfor %}
+{% endif %}
+{% if risk_lines %}
+<ul class="checks">
+  {% for line in risk_lines %}
+  <li class="check--fail">{{ line }}</li>
+  {% endfor %}
+</ul>
+{% else %}
+<p class="muted">No specific risks were flagged for this plan.</p>
+{% endif %}
+
+<h2>Human review</h2>
+{% if approval is none %}
+<p class="alert alert--info">
+  No approval was opened for this proposal yet.
+</p>
+{% elif approval.status == "pending" %}
+<section class="card card--tight">
+  <p class="alert alert--warn">
+    <strong>These are real orders.</strong>
+    Approving records your decision. It sends nothing by itself — each trade
+    below is executed separately, at the amount you choose, whenever the
+    portfolio allows it. Rejecting sends nothing.
+  </p>
+  <div class="actions">
+    <form method="post" action="/proposals/{{ proposal_record.id }}/reject" class="inline-form">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+      <input type="hidden" name="reason" value="Rejected from the review page." />
+      <button type="submit" class="button button--ghost">Reject proposal</button>
+    </form>
+    <form method="post" action="/proposals/{{ proposal_record.id }}/approve" class="inline-form">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+      <button type="submit" class="button">Approve plan</button>
+    </form>
+  </div>
+</section>
+{% else %}
+<section class="card card--muted">
+  <dl class="kv">
+    <dt>Decision</dt><dd>{{ approval.status | status_label }}</dd>
+    <dt>Requested</dt><dd>{{ approval.requested_at | localtime }}</dd>
+    <dt>Decided</dt>
+    <dd>{{ approval.decided_at | localtime if approval.decided_at else "—" }}</dd>
+    <dt>Used</dt>
+    <dd>{{ approval.used_at | localtime if approval.used_at else "—" }}</dd>
+    {% if approval.reason %}<dt>Reason</dt><dd>{{ approval.reason }}</dd>{% endif %}
+  </dl>
+</section>
+{% endif %}
+
+{% if approval and approval.status in ("approved", "consumed") %}
+
+{% if execution_complete %}
+<p class="alert alert--ok">
+  <strong>Execution complete.</strong> Every trade has been submitted. Use
+  <em>Refresh Order Status</em> to follow the fills from IOL.
+</p>
+{% endif %}
+
+{# ---- Reconcile -------------------------------------------------------- #}
+{% if any_submitted %}
+<h2>Order status</h2>
+<p class="muted">
+  Filled {{ filled_count }} &middot; partially filled {{ partial_count }} &middot;
+  pending {{ pending_count }} &middot; failed {{ failed_count }}.
+  A partial fill is never treated as a complete fill.
+</p>
+<div class="actions">
+  <form method="post" action="/proposals/{{ proposal_record.id }}/reconcile" class="inline-form">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+    <button type="submit" class="button button--ghost">Refresh Order Status</button>
+  </form>
+</div>
+<div class="table-wrap">
+<table class="table">
+  <thead>
+    <tr>
+      <th>Order ID</th><th>Symbol</th><th>Side</th>
+      <th class="num">Quantity</th><th class="num">Filled</th>
+      <th class="num">Executed price</th>
+      <th>Status</th><th>Broker operation</th><th>Detail</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for record in orders %}
+    <tr>
+      <td>{{ record.id }}</td>
+      <td>{{ record.payload.symbol }}</td>
+      <td>{{ record.payload.side }}</td>
+      <td class="num">{{ record.payload.quantity }}</td>
+      <td class="num">{{ record.payload.filled_quantity or "—" }}</td>
+      <td class="num">
+        {% if record.payload.filled_price %}{{ record.payload.filled_price | money(proposal.currency) }}
+        {% else %}<span class="muted">not reported</span>{% endif %}
+      </td>
+      <td>
+        <span class="badge {% if record.status == 'filled' %}badge--ok{% elif record.status in ('rejected', 'unknown') %}badge--danger{% else %}badge--warn{% endif %}">
+          {{ record.status | order_status_label }}
+        </span>
+      </td>
+      <td>{{ record.broker_order_id or "—" }}</td>
+      <td class="muted">{{ record.payload.message or "—" }}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+</div>
+{% endif %}
+
+{# ---- Final results ---------------------------------------------------- #}
+<h2>Final results</h2>
+<dl class="kv">
+  <dt>Executed sales</dt><dd>{{ sell_rows | selectattr('status', 'equalto', 'filled') | list | length }} of {{ sells | length }}</dd>
+  <dt>Executed purchases</dt><dd>{{ buy_rows | selectattr('status', 'equalto', 'filled') | list | length }} of {{ buys | length }}</dd>
+  <dt>Partially filled</dt><dd>{{ partial_count }}</dd>
+  <dt>Pending at IOL</dt><dd>{{ pending_count }}</dd>
+  <dt>Failed / unknown</dt><dd>{{ failed_count }}</dd>
+  <dt>Remaining cash at IOL</dt>
+  <dd>{{ cash_available | money(proposal.currency) if cash_available is not none else "refresh to see" }}</dd>
+  <dt>Final allocation (target)</dt>
+  <dd>{{ proposal.advice.target_cash_weight | percent }} cash
+    {% if proposal.advice %}{% for row in proposal.advice.decisions %} &middot; {{ row.symbol }} {{ row.target_weight | percent }}{% endfor %}{% endif %}
+  </dd>
+</dl>
+<p class="muted">
+  <a href="/portfolio?connection_id={{ connection.id }}">Open the Portfolio page</a>
+  to refresh and see your updated IOL holdings.
+</p>
+
+{% endif %}
+
+<details class="card card--muted">
+  <summary><strong>Technical details</strong> &mdash; portfolios, orders, metadata, timeline</summary>
+
+  <h4>Current portfolio vs simulated paper portfolio</h4>
+  {% if proposal.ledger_before and proposal.ledger_after %}
+  <div class="table-wrap">
+  <table class="table">
+    <thead>
+      <tr>
+        <th rowspan="2">Symbol</th>
+        <th colspan="3" class="num">Before (broker-derived)</th>
+        <th colspan="3" class="num">After (simulated)</th>
+      </tr>
+      <tr>
+        <th class="num">Qty</th>
+        <th class="num">Price</th>
+        <th class="num">Value</th>
+        <th class="num">Qty</th>
+        <th class="num">Price</th>
+        <th class="num">Value</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% set before = proposal.ledger_before %}
+      {% set after = proposal.ledger_after %}
+      <tr>
+        <td><strong>Cash</strong></td>
+        <td class="num" colspan="3">{{ before.cash | money(proposal.currency) }}</td>
+        <td class="num" colspan="3">{{ after.cash | money(proposal.currency) }}</td>
+      </tr>
+      {% for position in before.positions %}
+      {% set after_position = (after.positions | selectattr('symbol', 'equalto', position.symbol) | first) %}
+      <tr>
+        <td>{{ position.symbol }}</td>
+        <td class="num">{{ position.quantity }}</td>
+        <td class="num">{{ position.last_price | money(proposal.currency) }}</td>
+        <td class="num">{{ position.market_value | money(proposal.currency) }}</td>
+        <td class="num">{{ after_position.quantity if after_position else "—" }}</td>
+        <td class="num">{{ (after_position.last_price | money(proposal.currency)) if after_position else "—" }}</td>
+        <td class="num">{{ (after_position.market_value | money(proposal.currency)) if after_position else "—" }}</td>
+      </tr>
+      {% endfor %}
+      {% for position in after.positions %}
+      {% if position.symbol not in (before.positions | map(attribute='symbol') | list) %}
+      <tr>
+        <td>{{ position.symbol }} <span class="badge badge--ok">new</span></td>
+        <td class="num">—</td>
+        <td class="num">—</td>
+        <td class="num">—</td>
+        <td class="num">{{ position.quantity }}</td>
+        <td class="num">{{ position.last_price | money(proposal.currency) }}</td>
+        <td class="num">{{ position.market_value | money(proposal.currency) }}</td>
+      </tr>
+      {% endif %}
+      {% endfor %}
+      <tr>
+        <td><strong>Total</strong></td>
+        <td class="num" colspan="3">{{ before.total_value | money(proposal.currency) }}</td>
+        <td class="num" colspan="3">{{ after.total_value | money(proposal.currency) }}</td>
+      </tr>
+    </tbody>
+  </table>
+  </div>
+  {% else %}
+  <p class="muted">This proposal predates the before/after preview.</p>
+  {% endif %}
+
+  <h4>Model metadata</h4>
+  <dl class="kv">
+    {% if proposal.advice %}
+    <dt>Model</dt><dd>{{ proposal.advice.model_label }}</dd>
+    <dt>Provider / model</dt><dd>{{ proposal.advice.model_provider }} / {{ proposal.advice.model_name }}</dd>
+    <dt>Prompt version</dt><dd>{{ proposal.advice.analysis_version }}</dd>
+    {% endif %}
+    <dt>Approval mode</dt><dd>{{ proposal.approval_mode }}</dd>
+    <dt>Execution mode</dt><dd>{{ proposal.execution_mode }}</dd>
+    <dt>Turnover</dt><dd>{{ proposal.turnover | percent }}</dd>
+    <dt>Created</dt><dd>{{ proposal_record.created_at | localtime }}</dd>
+  </dl>
+
+  {% if proposal.warnings %}
+  <h4>Warnings</h4>
+  <ul class="checks">
+    {% for warning in proposal.warnings %}
+    <li class="check--fail">{{ warning }}</li>
+    {% endfor %}
+  </ul>
+  {% endif %}
+
+  <h4>Plan risk checks</h4>
+  <ul class="checks">
+    {% for check in proposal.risk_checks %}
+    <li class="{{ 'check--ok' if check.passed else 'check--fail' }}">
+      <strong>{{ "PASS" if check.passed else "FAIL" }}</strong>
+      <span class="muted">{{ check.name }}</span> — {{ check.detail }}
+    </li>
+    {% endfor %}
+  </ul>
+
+  <h4>Plan rows</h4>
+  <div class="table-wrap">
+  <table class="table">
+    <thead>
+      <tr>
+        <th>Symbol</th><th>Action</th><th class="num">Quantity</th>
+        <th class="num">Limit</th><th class="num">Notional</th>
+        <th class="num">Weight after</th><th>Why</th><th>Risks</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for item in proposal.recommendations %}
+      <tr>
+        <td>{{ item.symbol }}</td>
+        <td>
+          {{ item.action }}
+          {% if item.action != "HOLD" and not item.passed_risk %}
+            <span class="badge badge--danger">blocked</span>
+          {% endif %}
+        </td>
+        <td class="num">{{ item.quantity }}</td>
+        <td class="num">{{ item.limit_price | money(proposal.currency) if item.limit_price else "—" }}</td>
+        <td class="num">{{ item.notional | money(proposal.currency) if item.notional else "—" }}</td>
+        <td class="num">{{ item.weight_after | percent }}</td>
+        <td>{{ item.rationale }}</td>
+        <td class="muted">{{ item.risks | join(", ") if item.risks else "—" }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  </div>
+
+  {% for item in proposal.recommendations %}
+  <details class="card card--muted">
+    <summary><strong>{{ item.symbol }}</strong> &mdash; {{ item.action }}, evidence</summary>
+    <dl class="kv">
+      <dt>Last price</dt><dd>{{ item.evidence.last_price | money(proposal.currency) if item.evidence.last_price else "—" }}</dd>
+      <dt>EMA fast / slow</dt><dd>{{ item.evidence.ema_fast | number }} / {{ item.evidence.ema_slow | number }}</dd>
+      <dt>RSI</dt><dd>{{ item.evidence.rsi | number }}</dd>
+      <dt>MACD / signal / histogram</dt>
+      <dd>{{ item.evidence.macd | number(4) }} / {{ item.evidence.macd_signal | number(4) }} / {{ item.evidence.macd_histogram | number(4) }}</dd>
+      <dt>ATR</dt><dd>{{ item.evidence.atr | number }}</dd>
+      <dt>Observations</dt><dd>{{ item.evidence.observations }}</dd>
+    </dl>
+  </details>
+  {% endfor %}
+
+  <h4>Orders</h4>
+  {% if not orders %}
+  <p class="muted">No order has been saved for this proposal yet.</p>
+  {% else %}
+  <div class="table-wrap">
+  <table class="table">
+    <thead>
+      <tr>
+        <th>Order ID</th><th>Symbol</th><th>Side</th>
+        <th class="num">Quantity</th><th class="num">Limit</th>
+        <th class="num">Filled</th><th>Status</th>
+        <th>Broker operation</th><th>Message</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for record in orders %}
+      <tr>
+        <td>{{ record.id }}</td>
+        <td>{{ record.payload.symbol }}</td>
+        <td>{{ record.payload.side }}</td>
+        <td class="num">{{ record.payload.quantity }}</td>
+        <td class="num">{{ record.payload.limit_price }}</td>
+        <td class="num">{{ record.payload.filled_quantity or "—" }}</td>
+        <td>
+          <span class="badge {{ 'badge--ok' if record.status in ('filled', 'accepted') else 'badge--warn' }}">
+            {{ record.status }}
+          </span>
+        </td>
+        <td>{{ record.broker_order_id or "—" }}</td>
+        <td class="muted">{{ record.payload.message or "—" }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  </div>
+  {% endif %}
+
+  <h4>Timeline</h4>
+  {% if not events %}
+  <p class="muted">No events recorded yet.</p>
+  {% else %}
+  <ul class="checks">
+    {% for event in events %}
+    <li>
+      <span class="muted">{{ event.created_at | localtime }}</span>
+      <strong>{{ event.category }}/{{ event.event_type }}</strong>
+      — {{ event.message }}
+    </li>
+    {% endfor %}
+  </ul>
+  {% endif %}
+</details>
+
+<p><a href="/proposals">Back to proposals</a>
+   &middot; <a href="/analysis?connection_id={{ connection.id }}&country={{ proposal.country }}">Analysis</a></p>
+{% endblock %}

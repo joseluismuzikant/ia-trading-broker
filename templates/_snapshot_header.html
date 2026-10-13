@@ -1,0 +1,102 @@
+{# Shared header for the broker-data pages (profile, account status, and
+   country portfolio). Expects: connection, connections, csrf_token, refresh,
+   snapshot, request. The portfolio page also passes `country` and `countries`,
+   which switch on the country selector. #}
+<section class="card card--tight">
+  <div class="toolbar">
+    <div>
+      <span class="muted">Connection:</span>
+      <strong>{{ connection.label }}</strong>
+      <span class="muted">({{ connection.username }} &middot; {{ connection.broker }})</span>
+      {% if not connection.is_active %}
+        <span class="badge badge--warn">inactive</span>
+      {% endif %}
+    </div>
+
+    <form method="post" action="{{ request.url.path }}/refresh" class="inline-form">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+      <input type="hidden" name="connection_id" value="{{ connection.id }}" />
+      {% if country %}
+      <input type="hidden" name="country" value="{{ country }}" />
+      {% endif %}
+      <button type="submit" class="button">Refresh from IOL</button>
+    </form>
+  </div>
+
+  {% if country %}
+  <form method="get" action="{{ request.url.path }}" class="toolbar toolbar--sub">
+    <input type="hidden" name="connection_id" value="{{ connection.id }}" />
+    <label class="field__label" for="country">Country</label>
+    <select class="field__input" id="country" name="country">
+      {% for value in countries %}
+      <option value="{{ value }}" {% if value == country %}selected{% endif %}>
+        {{ value.replace("_", " ") | title }}
+      </option>
+      {% endfor %}
+    </select>
+    <button type="submit" class="button button--ghost">Show</button>
+  </form>
+  {% endif %}
+
+  {% if connections | length > 1 %}
+  <form method="get" action="{{ request.url.path }}" class="toolbar toolbar--sub">
+    {% if country %}<input type="hidden" name="country" value="{{ country }}" />{% endif %}
+    <label class="field__label" for="connection_id">Switch connection</label>
+    <select class="field__input" id="connection_id" name="connection_id">
+      {% for item in connections %}
+      <option value="{{ item.id }}" {% if item.id == connection.id %}selected{% endif %}>
+        {{ item.label }} ({{ item.username }})
+      </option>
+      {% endfor %}
+    </select>
+    <button type="submit" class="button button--ghost">Switch</button>
+  </form>
+  {% endif %}
+
+  <p class="snapshot-meta">
+    {% if snapshot %}
+      source: <strong>IOL</strong> &middot;
+      fetched <time>{{ snapshot.fetched_at | localtime }}</time>
+      {% if snapshot.is_stale %}
+        <span class="badge badge--warn">stale</span>
+      {% else %}
+        <span class="badge badge--ok">current</span>
+      {% endif %}
+    {% else %}
+      <span class="muted">No snapshot saved yet.</span>
+    {% endif %}
+  </p>
+
+  {% if iol_usage %}
+  <p class="snapshot-meta">
+    IOL API calls this month: <strong>{{ iol_usage.used }}</strong>{% if iol_usage.limit %}
+    of {{ iol_usage.limit }}{% endif %}
+    <span class="muted">({{ iol_usage.period }}, counted since this process started)</span>
+  </p>
+  {% endif %}
+</section>
+
+{% if refresh == "ok" %}
+<p class="alert alert--ok">Refreshed from IOL.</p>
+{% elif refresh == "stale" %}
+<p class="alert alert--error">
+  The refresh failed, so the last saved data is still shown.
+  {% if snapshot and snapshot.error %}<br /><span class="muted">{{ snapshot.error }}</span>{% endif %}
+</p>
+{% elif refresh == "failed" %}
+<p class="alert alert--error">
+  The refresh failed and there is no saved data yet.
+  {% if connection.last_error %}<br /><span class="muted">{{ connection.last_error }}</span>{% endif %}
+</p>
+{% endif %}
+
+{% if snapshot and snapshot.is_stale and refresh != "stale" %}
+<p class="alert alert--warn">
+  This data is stale.
+  {% if snapshot.stale_since %}
+    Last successful read {{ snapshot.fetched_at | localtime }},
+    marked stale on {{ snapshot.stale_since | localtime }}.
+  {% endif %}
+  {% if snapshot.error %}<br /><span class="muted">{{ snapshot.error }}</span>{% endif %}
+</p>
+{% endif %}

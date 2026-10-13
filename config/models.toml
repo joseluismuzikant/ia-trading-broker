@@ -1,0 +1,102 @@
+# The models a portfolio analysis may ask.
+#
+# This file is the single source of truth for which models the project may use.
+# Nothing in the code names a model: edit here to change the list. Each entry
+# maps a short key to what the UI shows and to the endpoint that answers.
+#
+#   [models.<key>]
+#   label      = what the dropdown and the review page show
+#   model      = the id your endpoint expects for this model
+#   provider   = who answers, recorded with the advice
+#   base_url   = an OpenAI-compatible endpoint
+#   api_key_env = the environment variable holding that provider's key
+#
+# Keys never live in this file: they are read from the environment through the
+# variable named in `api_key_env`. Every base URL must be HTTPS.
+#
+#   api        = "responses" (OpenAI Responses API, the default), "chat"
+#                (chat completions; what Gemini/DeepSeek/most compatible
+#                endpoints implement), or "anthropic" (Claude through the
+#                Anthropic SDK; the key is ANTHROPIC_API_KEY).
+#   timeout_seconds = optional wait for one call to this model (default: the
+#                deployment's OPENAI_TIMEOUT_SECONDS). Set it for slow
+#                reasoning models such as deepseek-reasoner.
+#   response_format = "json_schema" (the default: the strict schema is enforced
+#                by the endpoint) or "json_object" (for endpoints with only JSON
+#                mode, e.g. DeepSeek: the schema is put in the instructions and
+#                the answer is validated here). Only used with api = "chat".
+#   kind       = "openai" (the default) for a real endpoint, or "fake" for the
+#                offline simulator. A `fake` entry needs neither `base_url`
+#                nor `api_key_env`: it answers with a valid allocation and
+#                reaches no network, so a smoke test can run the whole flow
+#                with no provider key at all.
+
+[models.gpt_6_1_sol]
+label = "GPT-6.1 Sol"
+model = "gpt-6.1-sol"
+provider = "openai"
+base_url = "https://api.openai.com/v1"
+api_key_env = "OPENAI_API_KEY"
+
+
+# Google's current stable model. (gemini-2.5-pro is only served to keys that
+# already used it, so a new key gets a 404 and it is not listed.)
+[models.gemini_3_8_flash]
+label = "Gemini 3.8 Flash"
+model = "gemini-3.8-flash"
+provider = "google"
+api = "chat"
+base_url = "https://generativelanguage.googleapis.com/v1beta/openai/"
+api_key_env = "GEMINI_API_KEY"
+
+[models.mimo_v2_6_pro]
+label = "MiMo V2.6 Pro"
+model = "mimo-v2.6-pro"
+provider = "xiaomi"
+api = "chat"
+base_url = "https://api.xiaomimimo.com/v1"
+api_key_env = "MIMO_API_KEY"
+
+
+[models.deepseek_r1]
+label = "DeepSeek R1"
+model = "deepseek-reasoner"
+provider = "deepseek"
+api = "chat"
+base_url = "https://api.deepseek.com/v1"
+api_key_env = "DEEPSEEK_API_KEY"
+# DeepSeek has no json_schema mode: it answers `json_object` and the schema
+# travels in the instructions instead.
+response_format = "json_object"
+
+[models.grok_4]
+label = "Grok 4"
+model = "grok-4"
+provider = "xai"
+api = "chat"
+base_url = "https://api.x.ai/v1"
+api_key_env = "XAI_API_KEY"
+
+[models.claude_opus_5_5]
+label = "Claude Opus 5.5"
+model = "claude-opus-5-5"
+provider = "anthropic"
+# Claude is called through Anthropic's own SDK, not the OpenAI protocol.
+api = "anthropic"
+base_url = "https://api.anthropic.com"
+api_key_env = "ANTHROPIC_API_KEY"
+timeout_seconds = 180
+
+# The offline simulator. Picks no provider, spends no key, and still returns a
+# complete, valid allocation: the portfolio it is shown, kept as it is. The
+# review page records it plainly as a simulation, not a model answer.
+[models.fake_simulator]
+label = "Fake simulator (smoke test)"
+model = "fake-portfolio-advisor"
+provider = "simulator"
+kind = "fake"
+
+# The entry the analysis form preselects. It names the key above, not the API
+# id. An empty value in the environment (ANALYSIS_MODEL_DEFAULT) overrides it.
+[defaults]
+model = "gpt_6_1_sol"

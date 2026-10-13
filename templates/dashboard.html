@@ -1,0 +1,115 @@
+{% extends "base.html" %}
+{% block title %}Dashboard &middot; ia-trading-broker{% endblock %}
+
+{% block content %}
+<div class="page-head">
+  <h1>Dashboard</h1>
+  <p>
+    Signed in as <strong>{{ user.username }}</strong>
+    {% if user.is_admin %}<span class="badge">admin</span>{% endif %}
+  </p>
+</div>
+
+{% if next_action %}
+<div class="alert alert--info next-action">
+  <span>{{ next_action[0] }}</span>
+  <a class="button" href="{{ next_action[2] }}">{{ next_action[1] }}</a>
+</div>
+{% else %}
+<p class="alert alert--ok">Nothing needs your attention right now.</p>
+{% endif %}
+
+<section class="grid grid--stats">
+  <article class="stat">
+    <span class="stat__label">Connections</span>
+    <a class="stat__value" href="/connections">{{ connection_count }}</a>
+    <span class="stat__hint">broker logins saved</span>
+  </article>
+  <article class="stat">
+    <span class="stat__label">Proposals</span>
+    <a class="stat__value" href="/proposals">{{ proposal_count }}</a>
+    <span class="stat__hint">plans saved so far</span>
+  </article>
+  <article class="stat{% if awaiting_decision %} stat--warn{% endif %}">
+    <span class="stat__label">Awaiting your decision</span>
+    <a class="stat__value" href="/proposals">{{ awaiting_decision }}</a>
+    <span class="stat__hint">approve or reject</span>
+  </article>
+  <article class="stat{% if orders_waiting %} stat--warn{% endif %}">
+    <span class="stat__label">Orders at the broker</span>
+    <a class="stat__value" href="/proposals">{{ orders_waiting }}</a>
+    <span class="stat__hint">not settled yet</span>
+  </article>
+</section>
+
+<section class="card">
+  <h2>Recent proposals</h2>
+  {% if not recent %}
+  <p class="muted">None yet. <a href="/analysis">Run an analysis</a> to create one.</p>
+  {% else %}
+  <div class="table-wrap">
+  <table class="table">
+    <thead>
+      <tr>
+        <th>Proposal</th>
+        <th>Created</th>
+        <th>Model</th>
+        <th>Status</th>
+        <th class="num">Trades</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for row in recent %}
+      <tr>
+        <td><a href="/proposals/{{ row.record.id }}"><strong>#{{ row.record.id }}</strong></a></td>
+        <td>{{ row.record.created_at | localtime }}</td>
+        <td>{{ row.model_label }}</td>
+        <td>
+          <span class="badge {% if row.record.status == 'approved' %}badge--ok{% elif row.record.status == 'pending_review' %}badge--warn{% else %}badge--muted{% endif %}">
+            {{ row.record.status | status_label }}
+          </span>
+        </td>
+        <td class="num">{{ row.trades }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  </div>
+  <p class="muted"><a href="/proposals">All proposals &rarr;</a></p>
+  {% endif %}
+</section>
+
+<section class="grid">
+  <article class="card card--muted">
+    <h2>Portfolio</h2>
+    <p class="muted">Read positions, prices, and cash for one country.</p>
+    <p><a href="/portfolio">Open the country portfolio &rarr;</a></p>
+  </article>
+
+  <article class="card card--muted">
+    <h2>Analysis</h2>
+    <p class="muted">
+      Ask a model for a target allocation. Python sizes the trades and you
+      review them before anything is sent.
+    </p>
+    <p><a href="/analysis">Open analysis &rarr;</a></p>
+  </article>
+
+  <article class="card card--muted">
+    <h2>Help</h2>
+    <p class="muted">
+      Plain-language guides to the paper ledger, approvals, and the rest of the
+      vocabulary.
+    </p>
+    <p><a href="/help">Help and glossary &rarr;</a></p>
+  </article>
+
+  <article class="card card--muted">
+    <h2>Session</h2>
+    <dl class="kv">
+      <dt>Role</dt><dd>{{ "Administrator" if user.is_admin else "User" }}</dd>
+      <dt>Expires</dt><dd>{{ session_expires_at | localtime }}</dd>
+    </dl>
+  </article>
+</section>
+{% endblock %}

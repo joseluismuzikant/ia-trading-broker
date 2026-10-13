@@ -1,0 +1,13 @@
+{% extends "base.html" %}
+{% block title %}Broker connections &middot; ia-trading-broker{% endblock %}
+
+{% block content %}
+<div class="page-head">
+  <h1>Broker connections</h1>
+  <p>Saved IOL logins. The password is stored encrypted and never shown again.</p>
+</div>
+
+<section class="card">
+  {% include "_connections.html" %}
+</section>
+{% endblock %}

@@ -1,0 +1,10 @@
+{% extends "base.html" %}
+{% block title %}Error {{ status_code }} &middot; ia-trading-broker{% endblock %}
+
+{% block content %}
+<section class="card card--auth">
+  <h1>Error {{ status_code }}</h1>
+  <p class="alert alert--error" role="alert">{{ detail }}</p>
+  <p><a class="button button--ghost" href="/">Back to start</a></p>
+</section>
+{% endblock %}

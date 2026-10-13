@@ -1,0 +1,24 @@
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+.coverage
+htmlcov/
+*.sqlite3
+*.db
+.env
+
+# Editor and IDE state (personal, machine-specific)
+.vscode/
+.idea/
+
+# Broker API collections: vendor documentation, kept local and never committed
+postman/
+
+# Secrets and keys (the example file stays tracked)
+.env.*
+!.env.example
+*.pem
+*.key

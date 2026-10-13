@@ -1,0 +1,90 @@
+{% extends "base.html" %}
+{% block title %}Proposals &middot; ia-trading-broker{% endblock %}
+
+
+{% block content %}
+<div class="page-head">
+  <h1>Proposals</h1>
+  <p>
+    Every plan this account has saved, newest first. Open one to review the
+    exact trades before deciding anything.
+    <a href="/analysis">Run a new analysis</a> to create another.
+  </p>
+</div>
+
+{% if request.query_params.get("deleted") %}
+<p class="alert alert--ok">Proposal deleted.</p>
+{% elif request.query_params.get("error") %}
+<p class="alert alert--error">{{ request.query_params.get("error") }}</p>
+{% endif %}
+
+{% if not rows %}
+<p class="alert alert--info">
+  No proposals yet. <a href="/analysis">Run an analysis</a> to create one.
+</p>
+{% else %}
+<div class="table-wrap">
+<table class="table">
+  <thead>
+    <tr>
+      <th>Proposal</th>
+      <th>Created</th>
+      <th>Connection</th>
+      <th>Country</th>
+      <th>Model</th>
+      <th>Status</th>
+      <th class="num">Trades</th>
+      <th class="num">Portfolio value</th>
+      <th>Actions</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for row in rows %}
+    <tr>
+      <td><strong>Proposal #{{ row.record.id }}</strong></td>
+      <td>{{ row.record.created_at | localtime }}</td>
+      <td>{{ connection_labels.get(row.record.connection_id, "—") }}</td>
+      <td>{{ row.record.country.replace("_", " ") | title }}</td>
+      <td>{{ row.model_label }}</td>
+      <td>
+        <span class="badge {% if row.record.status == 'approved' %}badge--ok{% elif row.record.status == 'pending_review' %}badge--warn{% else %}badge--muted{% endif %}">
+          {{ row.record.status | status_label }}
+        </span>
+      </td>
+      <td class="num">{{ row.trades }}</td>
+      <td class="num">
+        {% if row.portfolio_value is not none %}
+        {{ row.portfolio_value | money(row.currency) }}
+        {% else %}—{% endif %}
+      </td>
+      <td>
+        <div class="actions" style="margin: 0;">
+          <a class="button button--ghost" href="/proposals/{{ row.record.id }}">View</a>
+          <a class="button button--ghost" target="_blank" rel="noopener"
+             href="/proposals/{{ row.record.id }}/export">Export PDF</a>
+          {% if row.deletable %}
+          <form method="post" action="/proposals/{{ row.record.id }}/delete"
+                class="inline-form"
+                onsubmit="return confirm('Delete Proposal #{{ row.record.id }}? This cannot be undone.');">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+            <button type="submit" class="button button--ghost">Delete</button>
+          </form>
+          {% else %}
+          <span class="muted" title="Orders are still at the broker and must be reconciled first.">
+            Delete unavailable
+          </span>
+          {% endif %}
+        </div>
+      </td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+</div>
+<p class="muted">
+  A proposal can be deleted only while none of its orders is waiting at the
+  broker. Deleting removes the plan, its approval, its settled orders, and
+  their events; one <code>proposal.deleted</code> entry stays in the history.
+</p>
+{% endif %}
+{% endblock %}

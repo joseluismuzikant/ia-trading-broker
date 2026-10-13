@@ -1,0 +1,25 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "permission": {
+    "read": {
+      "*": "allow",
+      "*.env": "deny",
+      "*.env.*": "deny",
+      "*.env.example": "allow"
+    },
+    "edit": "ask",
+    "bash": {
+      "*": "ask",
+      "python -m pytest*": "allow",
+      "pytest*": "allow",
+      "ruff check*": "allow",
+      "ruff format*": "allow",
+      "git status*": "allow",
+      "git diff*": "allow",
+      "git log*": "allow",
+      "docker compose ps*": "allow",
+      "docker compose logs*": "allow",
+      "cat .env*": "deny"
+    }
+  }
+}

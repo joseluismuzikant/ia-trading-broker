@@ -1,0 +1,13 @@
+<ol class="steps" aria-label="Proposal progress">
+  {% for step in steps %}
+  <li class="steps__item steps__item--{{ step.state }}"{% if step.state == "current" %} aria-current="step"{% endif %}>
+    <span class="steps__mark" aria-hidden="true">
+      {% if step.state == "done" %}&#10003;{% elif step.state == "stopped" %}&#10005;{% elif step.state == "skipped" %}&ndash;{% else %}{{ loop.index }}{% endif %}
+    </span>
+    <span class="steps__text">
+      <strong>{{ step.label }}</strong>
+      {% if step.hint %}<span class="steps__hint">{{ step.hint }}</span>{% endif %}
+    </span>
+  </li>
+  {% endfor %}
+</ol>

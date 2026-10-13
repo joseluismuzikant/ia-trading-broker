@@ -1,0 +1,202 @@
+# The trading universe and the portfolio limits.
+#
+# This file is the single source of truth for which instruments the project
+# considers. Nothing in the code names a symbol: edit here to change the
+# universe. Each entry maps the ticker to its paper name, which is what the
+# analysis pages show.
+#
+#   SYMBOL = "Paper name"
+#
+# Every category may declare the market its symbols are quoted on; the value
+# defaults to BCBA when it is left out.
+#
+# A category may also declare how its quotes must be read:
+#
+#   quotation_factor         how many units one quote covers (1 for stocks
+#                            and CEDEARs, 100 for sovereign bonds). One unit
+#                            costs quoted_price / factor and an order moves
+#                            quoted_price * quantity / factor. The order sent
+#                            to IOL keeps the quoted price unchanged.
+#   min_quantity             smallest quantity IOL accepts (nominales for a
+#                            bond). 0 means none is declared.
+#   live_quantity_confirmed  whether the meaning of the API "cantidad" field
+#                            for this category has been verified. When false,
+#                            live orders for the category are blocked instead
+#                            of guessed.
+
+[universe.argentina_stocks]
+market = "BCBA"
+
+# Argentine equities from IOL's main and Panel General equity lists.
+# Currency/settlement aliases such as GGALD, YPFDD, CRESD, IRSAD, etc. are
+# intentionally excluded so the same underlying company is not represented
+# twice in portfolio analysis.
+#
+# DOME is also excluded because IOL currently identifies it as a subscription
+# right ("Suscripción Preferente"), not an ordinary equity.
+[universe.argentina_stocks.instruments]
+A3 = "A3 Mercados S.A."
+AGRO = "Agrometal S.A.I."
+ALUA = "Aluar Aluminio Argentino S.A.I.C."
+AUSO = "Autopistas del Sol S.A."
+BBAR = "BBVA Argentina S.A."
+BHIP = "Banco Hipotecario S.A."
+BMA = "Banco Macro S.A."
+BOLT = "Boldt S.A."
+BPAT = "Banco Patagonia S.A."
+BYMA = "BYMA S.A."
+CADO = "Carlos Casado S.A."
+CAPX = "Capex S.A."
+CARC = "Carboclor S.A."
+CECO2 = "Central Costanera S.A."
+CELU = "Celulosa Argentina S.A."
+CEPU = "Central Puerto S.A."
+CGPA2 = "Camuzzi Gas Pampeana S.A."
+COME = "Sociedad Comercial del Plata S.A."
+CRES = "Cresud S.A.C.I.F. y A."
+CTIO = "Consultatio S.A."
+CVH = "Cablevisión Holding S.A."
+DGCU2 = "Distribuidora de Gas Cuyana S.A."
+ECOG = "Ecogas Inversiones S.A."
+EDN = "Edenor S.A."
+FERR = "Ferrum S.A."
+FIPL = "Fiplasto S.A."
+GAMI = "B-Gaming S.A."
+GARO = "Garovaglio y Zorraquín S.A."
+GBAN = "Naturgy BAN S.A."
+GCDI = "GCDI S.A."
+GCLA = "Grupo Clarín S.A."
+GGAL = "Grupo Financiero Galicia S.A."
+GRIM = "Grimoldi S.A."
+HARG = "Holcim Argentina S.A."
+HAVA = "Havanna Holding S.A."
+IEB = "Dycasa S.A."
+INTR = "Compañía Introductora de Buenos Aires S.A."
+INVJ = "Inversora Juramento S.A."
+IRSA = "IRSA Inversiones y Representaciones S.A."
+LEDE = "Ledesma S.A.A.I."
+LOMA = "Loma Negra C.I.A.S.A."
+LONG = "Longvie S.A."
+METR = "Metrogas S.A."
+MIRG = "Mirgor S.A.C.I.F.I.A."
+MOLA = "Molinos Agro S.A."
+MOLI = "Molinos Río de la Plata S.A."
+MORI = "Morixe Hermanos S.A.C.I."
+OEST = "Grupo Concesionario del Oeste S.A."
+PAMP = "Pampa Energía S.A."
+PATA = "Importadora y Exportadora de la Patagonia S.A."
+POLL = "Polledo S.A.I.C. y F."
+RICH = "Laboratorios Richmond S.A.C.I.F."
+RIGO = "Rigolleau S.A."
+ROSE = "Instituto Rosenbusch S.A."
+SAMI = "San Miguel S.A."
+SEMI = "Molinos Juan Semino S.A."
+SUPV = "Grupo Supervielle S.A."
+TECO2 = "Telecom Argentina S.A."
+TGNO4 = "Transportadora de Gas del Norte S.A."
+TGSU2 = "Transportadora de Gas del Sur S.A."
+TRAN = "Transener S.A."
+TXAR = "Ternium Argentina S.A."
+VALO = "Banco de Valores S.A."
+VIST = "Vista Energy S.A."
+YPFD = "YPF S.A."
+
+[universe.cedears]
+market = "BCBA"
+
+# 50 major, liquid or globally representative CEDEARs/CEDEAR ETFs.
+[universe.cedears.instruments]
+SPY = "SPDR S&P 500 ETF Trust"
+QQQ = "Invesco QQQ Trust"
+AAPL = "Apple Inc."
+MSFT = "Microsoft Corporation"
+GOOGL = "Alphabet Inc. Class A"
+AMZN = "Amazon.com, Inc."
+NVDA = "NVIDIA Corporation"
+META = "Meta Platforms, Inc."
+TSLA = "Tesla, Inc."
+MELI = "MercadoLibre, Inc."
+AMD = "Advanced Micro Devices, Inc."
+INTC = "Intel Corporation"
+AVGO = "Broadcom Inc."
+QCOM = "QUALCOMM Incorporated"
+ORCL = "Oracle Corporation"
+CRM = "Salesforce, Inc."
+IBM = "International Business Machines Corporation"
+ADBE = "Adobe Inc."
+JPM = "JPMorgan Chase & Co."
+BAC = "Bank of America Corporation"
+GS = "The Goldman Sachs Group, Inc."
+V = "Visa Inc."
+MA = "Mastercard Incorporated"
+PYPL = "PayPal Holdings, Inc."
+KO = "The Coca-Cola Company"
+PEP = "PepsiCo, Inc."
+MCD = "McDonald's Corporation"
+WMT = "Walmart Inc."
+COST = "Costco Wholesale Corporation"
+HD = "The Home Depot, Inc."
+NKE = "NIKE, Inc."
+DIS = "The Walt Disney Company"
+NFLX = "Netflix, Inc."
+XOM = "Exxon Mobil Corporation"
+CVX = "Chevron Corporation"
+SLB = "SLB"
+JNJ = "Johnson & Johnson"
+PFE = "Pfizer Inc."
+MRK = "Merck & Co., Inc."
+LLY = "Eli Lilly and Company"
+UNH = "UnitedHealth Group Incorporated"
+BA = "The Boeing Company"
+CAT = "Caterpillar Inc."
+GE = "GE Aerospace"
+MMM = "3M Company"
+GOLD = "Barrick Mining Corporation"
+BABA = "Alibaba Group Holding Limited"
+BRKB = "Berkshire Hathaway Inc. Class B"
+TSM = "Taiwan Semiconductor Manufacturing Company Limited"
+GLD = "SPDR Gold Shares"
+
+[universe.bonds]
+market = "BCBA"
+# IOL quotes sovereign bonds per 100 nominales: a quote of 85.800 is 85.800
+# per 100 nominales, so one nominal costs 858. The order price sent to IOL is
+# the quoted price; only the sizing divides by this factor.
+quotation_factor = 100
+# `cantidad` is the amount of units — nominales for a bond, shares for a
+# stock. Verified against the live account, so live bond orders are enabled.
+live_quantity_confirmed = true
+# Smallest nominal amount IOL accepts for these bonds. 0 = none declared, so
+# no artificial floor is imposed. Set it if the broker enforces one.
+min_quantity = 0
+
+# Main USD sovereign bond families, split between Argentine-law (AL/AE)
+# and New York-law (GD) instruments.
+[universe.bonds.instruments]
+AL29 = "Bonar 2029"
+AL30 = "Bonar 2030"
+AL35 = "Bonar 2035"
+AE38 = "Bonar 2038"
+AL41 = "Bonar 2041"
+GD29 = "Global 2029"
+GD30 = "Global 2030"
+GD35 = "Global 2035"
+GD38 = "Global 2038"
+GD41 = "Global 2041"
+
+# Hard portfolio limits. The risk manager refuses any order that would break
+# one of them, and the review page shows which limit stopped an order.
+[portfolio_constraints]
+max_open_positions = 8
+max_argentina_stock_positions = 4
+max_cedear_positions = 3
+max_bond_positions = 2
+max_single_position_pct = 0.15
+min_cash_pct = 0.10
+max_trades_per_run = 3
+
+# Width of the analysis funnel: how many instruments each stage may keep.
+[selection]
+candidates_min = 10
+candidates_max = 12
+finalists = 5

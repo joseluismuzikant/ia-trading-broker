@@ -1,0 +1,51 @@
+{
+  "pais": "Argentina",
+  "activos": [
+    {
+      "cantidad": 100,
+      "comprometido": 25,
+      "puntosVariacion": 0.75,
+      "variacionDiaria": 1.25,
+      "ultimoPrecio": 60.555,
+      "ppc": 50.0,
+      "gananciaPorcentaje": 21.11,
+      "gananciaDinero": 1055.5,
+      "valorizado": 6055.5,
+      "titulo": {
+        "simbolo": "GGAL",
+        "descripcion": "Grupo Financiero Galicia",
+        "pais": "Argentina",
+        "mercado": "BCBA",
+        "tipo": "ACCIONES",
+        "plazo": "T0",
+        "moneda": "Peso_Argentino"
+      },
+      "parking": {
+        "disponibleInmediato": 0
+      }
+    },
+    {
+      "cantidad": 10,
+      "comprometido": 0,
+      "puntosVariacion": 0,
+      "variacionDiaria": 0,
+      "ultimoPrecio": 1200.0,
+      "ppc": 1000.0,
+      "gananciaPorcentaje": 20.0,
+      "gananciaDinero": 2000.0,
+      "valorizado": 12000.0,
+      "titulo": {
+        "simbolo": "YPFD",
+        "descripcion": "YPF S.A.",
+        "pais": "Argentina",
+        "mercado": "BCBA",
+        "tipo": "ACCIONES",
+        "plazo": "T0",
+        "moneda": "Peso_Argentino"
+      },
+      "parking": {
+        "disponibleInmediato": 0
+      }
+    }
+  ]
+}
