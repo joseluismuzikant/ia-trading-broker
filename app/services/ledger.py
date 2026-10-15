@@ -11,6 +11,7 @@ back.
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from decimal import Decimal, InvalidOperation
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -18,7 +19,13 @@ from app.domain.money import Money, money, quantity
 from app.domain.portfolio import Portfolio
 from app.domain.trading import Order, PaperLedger, PaperPosition
 from app.domain.universe import UniverseConfig
-from app.models import BrokerConnection, ledger_snapshot_kind, portfolio_snapshot_kind
+from app.models import (
+    BrokerConnection,
+    ledger_snapshot_kind,
+    paper_account_snapshot_kind,
+    portfolio_snapshot_kind,
+)
+from app.services import connections as connections_service
 from app.services import snapshots as snapshots_service
 
 
@@ -234,4 +241,125 @@ def apply_fill(
         positions=positions,
         source_snapshot_id=ledger.source_snapshot_id,
         created_at=datetime.now(UTC),
+    )
+
+
+# --- Paper accounts --------------------------------------------------------
+
+#: The currency a paper account starts in. It matches the name IOL uses, so a
+#: paper account and an IOL account compare cash the same way.
+PAPER_DEFAULT_CURRENCY = "Peso_Argentino"
+
+
+async def load_paper_account(
+    db: AsyncSession, *, user_id: int, connection: BrokerConnection, country: str
+) -> PaperLedger | None:
+    """The saved state of a paper account, or None before it was started."""
+    snapshot = await snapshots_service.latest_snapshot(
+        db,
+        user_id=user_id,
+        connection_id=connection.id,
+        kind=paper_account_snapshot_kind(country),
+    )
+    return PaperLedger.model_validate(snapshot.payload) if snapshot is not None else None
+
+
+async def save_paper_account(
+    db: AsyncSession, *, user_id: int, connection: BrokerConnection, ledger: PaperLedger
+) -> PaperLedger:
+    """Save the paper account as a new snapshot; the earlier states are kept."""
+    await snapshots_service.save_snapshot(
+        db,
+        user_id=user_id,
+        connection_id=connection.id,
+        kind=paper_account_snapshot_kind(ledger.country),
+        payload=ledger.model_dump(mode="json"),
+    )
+    return ledger
+
+
+async def start_paper_account(
+    db: AsyncSession,
+    *,
+    user_id: int,
+    connection: BrokerConnection,
+    source: BrokerConnection | None,
+    country: str,
+    starting: str,
+    initial_cash: str | None,
+    universe: UniverseConfig | None = None,
+) -> PaperLedger:
+    """Create (or reset) a paper account from its starting point.
+
+    ``starting="cash"`` begins with only cash. ``starting="copy"`` copies the
+    holdings and cash from the newest saved portfolio of the price-source
+    connection, so a plan can be tried against a realistic account without
+    touching it. Nothing here contacts a broker.
+    """
+    if starting == "copy":
+        if source is None:
+            raise LedgerError("A paper account needs a connection to copy from.")
+        saved = await snapshots_service.latest_snapshot(
+            db,
+            user_id=user_id,
+            connection_id=source.id,
+            kind=portfolio_snapshot_kind(country),
+        )
+        if saved is None:
+            raise LedgerError(
+                "The account to copy has no saved portfolio for this country yet. "
+                "Refresh its portfolio first."
+            )
+        ledger = ledger_from_portfolio(
+            Portfolio.model_validate(saved.payload),
+            source_snapshot_id=saved.id,
+            universe=universe,
+        )
+    elif starting == "cash":
+        try:
+            cash = Decimal(str(initial_cash or "").strip().replace(",", ""))
+        except InvalidOperation as exc:
+            raise LedgerError("Starting cash must be a number.") from exc
+        if cash <= 0:
+            raise LedgerError("Starting cash must be above zero.")
+        ledger = PaperLedger(
+            country=country,
+            currency=PAPER_DEFAULT_CURRENCY,
+            cash=money(cash),
+            positions=[],
+            created_at=datetime.now(UTC),
+        )
+    else:
+        raise LedgerError(f"Unknown starting point {starting!r}.")
+
+    return await save_paper_account(db, user_id=user_id, connection=connection, ledger=ledger)
+
+
+async def reset_paper_account(
+    db: AsyncSession,
+    *,
+    user_id: int,
+    connection: BrokerConnection,
+    universe: UniverseConfig | None = None,
+) -> PaperLedger:
+    """Return a paper account to the starting point it was created with.
+
+    It is a new saved state, not an edit: the earlier states stay in the
+    snapshot history, and orders already recorded are left alone.
+    """
+    options = connections_service.load_options(connection)
+    source = None
+    if connection.price_source_connection_id is not None:
+        source = await connections_service.get_connection(
+            db, user_id=user_id, connection_id=connection.price_source_connection_id
+        )
+    return await start_paper_account(
+        db,
+        user_id=user_id,
+        connection=connection,
+        source=source,
+        country=connection.country,
+        starting=options.get("starting", "cash"),
+        initial_cash=options.get("initial_cash"),
+        universe=universe,
     )

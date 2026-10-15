@@ -499,3 +499,172 @@ async def test_resuming_a_finished_run_changes_nothing(
 
     assert again["status"] == trading_flow.STATUS_COMPLETED
     assert len(await _orders(db_session, user, proposal_id)) == len(orders_after)
+
+
+# --- Sending an answer back: the retry edge ---------------------------------
+
+from dataclasses import dataclass, field  # noqa: E402
+
+from app.infrastructure.simulation import FakePortfolioAdvisor  # noqa: E402
+from app.services import advice as advice_service  # noqa: E402
+from app.services import events as events_service  # noqa: E402
+
+CURRENT = {"GGAL": 0.3336, "YPFD": 0.6609}
+
+
+def _fillable():
+    """Sell some GGAL, keep YPFD: every trade can be filled with whole units."""
+    return advice_from_targets({"GGAL": 0.30, "YPFD": 0.60}, cash=0.10, current=CURRENT)
+
+
+def _unfillable():
+    """A new VIST position worth about 109 pesos when one VIST costs about 128.
+
+    The target is above the allocation tolerance, so it is a real BUY request,
+    yet below one whole share, so it can never be filled.
+    """
+    return advice_from_targets(
+        {"GGAL": 0.30, "YPFD": 0.594, "VIST": 0.006}, cash=0.10, current=CURRENT
+    )
+
+
+def _invented_symbol():
+    """Allocates money to a symbol that is not in the account or the watchlist."""
+    return advice_from_targets(
+        {"GGAL": 0.30, "YPFD": 0.594, "ZZZZ": 0.006}, cash=0.10, current=CURRENT
+    )
+
+
+@dataclass
+class ScriptedAdvisor(FakePortfolioAdvisor):
+    """Answers from a list, one per call, and remembers every context it saw."""
+
+    answers: list = field(default_factory=list)
+
+    async def analyze(self, context):
+        self.contexts.append(context)
+        index = min(len(self.contexts), len(self.answers)) - 1
+        return self.answers[index]
+
+
+def _use(monkeypatch, *answers) -> ScriptedAdvisor:
+    advisor = ScriptedAdvisor(answers=list(answers))
+    monkeypatch.setattr(advice_service, "build_advisor", lambda model=None: advisor)
+    return advisor
+
+
+async def _run(db_session, make_user, fake_iol):
+    from tests.day5_helpers import save_price_history_snapshot, uptrend_quotes
+
+    user = await make_user("alice")
+    connection = await make_connection(db_session, user, fake_iol)
+    # VIST has a price (about 128 pesos a share), so a tiny target is a real,
+    # unfillable request rather than a symbol the planner skips.
+    await save_price_history_snapshot(
+        db_session,
+        user_id=user.id,
+        connection=connection,
+        symbol="VIST",
+        quotes=uptrend_quotes(),
+    )
+    state = await trading_flow.start_run(
+        db_session, user_id=user.id, connection=connection, country="argentina"
+    )
+    return user, connection, state
+
+
+async def _proposal_of(db_session, user, state) -> Proposal:
+    record = await analysis_service.get_proposal(
+        db_session, user_id=user.id, proposal_id=state["proposal_id"]
+    )
+    return Proposal.model_validate(record.payload)
+
+
+async def _event_types(db_session, user):
+    events = await events_service.list_events(db_session, user_id=user.id)
+    return [event.event_type for event in events]
+
+
+async def test_an_unfillable_answer_is_sent_back_and_the_second_one_is_used(
+    db_session, make_user, fake_iol, monkeypatch
+) -> None:
+    advisor = _use(monkeypatch, _unfillable(), _fillable())
+
+    user, _connection, state = await _run(db_session, make_user, fake_iol)
+
+    assert state["status"] == trading_flow.STATUS_AWAITING_APPROVAL
+    assert len(advisor.contexts) == 2
+    assert advisor.contexts[0].corrections == ()
+    corrections = advisor.contexts[1].corrections
+    assert corrections and "VIST" in corrections[0]
+    assert "does not fit" in corrections[0]
+    proposal = await _proposal_of(db_session, user, state)
+    assert proposal.attempts == 2
+    assert [item.symbol for item in proposal.recommendations if not item.executable] == []
+    assert any("sent back 1 time" in warning for warning in proposal.warnings)
+    assert "advice.retry" in await _event_types(db_session, user)
+
+
+async def test_a_refused_answer_is_sent_back_before_the_run_gives_up(
+    db_session, make_user, fake_iol, monkeypatch
+) -> None:
+    advisor = _use(monkeypatch, _invented_symbol(), _fillable())
+
+    user, _connection, state = await _run(db_session, make_user, fake_iol)
+
+    assert state["status"] == trading_flow.STATUS_AWAITING_APPROVAL
+    assert len(advisor.contexts) == 2
+    assert "ZZZZ" in advisor.contexts[1].corrections[0]
+    assert (await _proposal_of(db_session, user, state)).attempts == 2
+
+
+async def test_two_refusals_in_a_row_stop_the_run_without_a_proposal(
+    db_session, make_user, fake_iol, monkeypatch
+) -> None:
+    advisor = _use(monkeypatch, _invented_symbol(), _invented_symbol())
+
+    user, _connection, state = await _run(db_session, make_user, fake_iol)
+
+    assert state["status"] == trading_flow.STATUS_FAILED
+    assert len(advisor.contexts) == 2  # bounded: never a third call
+    assert await analysis_service.count_proposals(db_session, user_id=user.id) == 0
+
+
+async def test_when_attempts_run_out_the_proposal_still_lists_what_cannot_be_traded(
+    db_session, make_user, fake_iol, monkeypatch
+) -> None:
+    advisor = _use(monkeypatch, _unfillable())  # the model never corrects itself
+
+    user, _connection, state = await _run(db_session, make_user, fake_iol)
+
+    assert state["status"] == trading_flow.STATUS_AWAITING_APPROVAL
+    assert len(advisor.contexts) == 2
+    proposal = await _proposal_of(db_session, user, state)
+    assert proposal.attempts == 2
+    blocked = [item for item in proposal.recommendations if not item.executable]
+    assert [item.symbol for item in blocked] == ["VIST"]
+    assert any("still cannot be traded" in warning for warning in proposal.warnings)
+
+
+async def test_one_attempt_disables_the_retry(db_session, make_user, fake_iol, monkeypatch) -> None:
+    from app.config import get_settings
+
+    monkeypatch.setattr(get_settings(), "analysis_max_attempts", 1)
+    advisor = _use(monkeypatch, _unfillable(), _fillable())
+
+    user, _connection, state = await _run(db_session, make_user, fake_iol)
+
+    assert len(advisor.contexts) == 1
+    assert (await _proposal_of(db_session, user, state)).attempts == 1
+
+
+async def test_a_fillable_first_answer_is_never_sent_back(
+    db_session, make_user, fake_iol, monkeypatch
+) -> None:
+    advisor = _use(monkeypatch, _fillable())
+
+    user, _connection, state = await _run(db_session, make_user, fake_iol)
+
+    assert len(advisor.contexts) == 1
+    assert (await _proposal_of(db_session, user, state)).attempts == 1
+    assert "advice.retry" not in await _event_types(db_session, user)

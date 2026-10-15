@@ -8,7 +8,7 @@ and approve them. It is a reviewed rebalance, not a trading bot.
 - The model only suggests target weights. It never sees or sends an order.
 - Python validates the answer and sizes every trade (whole units, sells before buys, cash and position limits).
 - Nothing reaches the broker without your approval, and each trade is executed on your command.
-- **InvertirOnline (IOL)** is the primary integration. The architecture is broker-independent, and a PPI adapter exists but is not connected yet.
+- **InvertirOnline (IOL)** is the primary integration. The architecture is broker-independent: a **paper account** lets you try plans with no real money, and a PPI connection can be saved and read for cash and prices (it cannot be analysed or traded yet).
 
 > **Disclaimer.** This is an independent experimental trading application. It is
 > not affiliated with, sponsored by, or endorsed by InvertirOnline (IOL), PPI or
@@ -39,9 +39,9 @@ and approve them. It is a reviewed rebalance, not a trading bot.
 
 | Status | What |
 |---|---|
-| **Implemented** (covered by offline tests with fake brokers and a fake model) | IOL login, portfolio, account status and daily price history reads · one-call AI allocation through a model catalog (OpenAI, Gemini, MiMo, Grok, DeepSeek, Claude) · deterministic validation and rebalance (whole units, sells first, cash floor, position caps, bond quotation factors, "not executable" reasons) · paper ledger preview · single-use human approval that expires · per-trade execution capped at the reviewed quantity, sales before purchases, idempotent order rows · on-demand reconciliation · event history · encrypted broker credentials · error and trace redaction · optional LangSmith tracing |
-| **Experimental / not validated** | **Live IOL order execution**: submission reached IOL in the author's manual tests, but fills, partial fills, rejections and restarts have not all been validated against the real broker end to end · Claude through the Anthropic SDK and DeepSeek JSON mode have not been exercised against the live APIs · the PPI adapter (client and executor tested only against a mock; PPI's published schema has no holdings list, so there is no PPI portfolio reader) |
-| **Planned** | A broker-reader port and a second broker · per-strategy allocation bands · running several models side by side · scheduled reconciliation, Orders and Activity pages · performance tracking · deployment automation · Interactive Brokers. Details in the [roadmap](docs/roadmap.md) |
+| **Implemented** (covered by offline tests with fake brokers and a fake model) | IOL login, portfolio, account status and daily price history reads · one-call AI allocation through a model catalog (OpenAI, Gemini, MiMo, Grok, DeepSeek, Claude) · deterministic validation and rebalance (whole units, sells first, cash floor, position caps, bond quotation factors, "not executable" reasons) · paper ledger preview · single-use human approval that expires · per-trade execution capped at the reviewed quantity, sales before purchases, idempotent order rows · on-demand reconciliation · event history · a broker-reader port with IOL, PPI and paper adapters · per-broker encrypted credentials with a form that follows the chosen broker · paper accounts (their own saved state, priced through a real connection, with a reset) · currency on money amounts · error and trace redaction · optional LangSmith tracing |
+| **Experimental / not validated** | **Live IOL order execution**: submission reached IOL in the author's manual tests, but fills, partial fills, rejections and restarts have not all been validated against the real broker end to end · Claude through the Anthropic SDK and DeepSeek JSON mode have not been exercised against the live APIs · PPI (login, cash and prices tested only against a mock; PPI's published schema has no holdings list, so a PPI account cannot be analysed, and no PPI order can be sent) |
+| **Planned** | A PPI portfolio reader and PPI orders · ARS and USD through the ledger and rebalance · per-strategy allocation bands · running several models side by side · scheduled reconciliation, Orders and Activity pages · performance tracking · deployment automation · Interactive Brokers. Details in the [roadmap](docs/roadmap.md) |
 
 **Current limitations:** one currency per ledger (no USD cash); daily data only;
 reconciliation runs when you press a button, and an order that never got an
@@ -67,7 +67,7 @@ multi-user service; not hardened or reviewed for production use.
 ## How it works
 
 1. **Read** the current portfolio and daily prices from the broker.
-2. **Ask** one model for a target allocation of the whole account (one call per run).
+2. **Ask** one model for a target allocation of the whole account. If its answer is refused or cannot be turned into trades, it is sent back once with the reasons.
 3. **Validate and size** in Python, and apply the trades to a paper ledger.
 4. **Review** the before and after portfolio on a page.
 5. **Approve** or reject. Approving sends nothing by itself, and an approval expires.
@@ -82,7 +82,8 @@ flowchart TD
     load_broker_state --> create_paper_ledger
     create_paper_ledger --> build_analysis_context
     build_analysis_context --> analyse_portfolio
-    analyse_portfolio -->|the only AI call| validate_advice
+    analyse_portfolio -->|the only model node| validate_advice
+    validate_advice -->|refused or unfillable, sent back once| analyse_portfolio
     validate_advice --> apply_to_paper_ledger
     apply_to_paper_ledger --> request_approval
     request_approval --> await_approval
@@ -102,7 +103,7 @@ flowchart TD
 | Database | PostgreSQL (async SQLAlchemy). Tests use in-memory SQLite |
 | Workflow | LangGraph 1.x, optional LangSmith tracing |
 | Models | OpenAI, Gemini, DeepSeek, Grok, MiMo and Claude, chosen in `config/models.toml` |
-| Brokers | IOL (primary), PPI (adapter only) |
+| Brokers | IOL (primary), PPI (cash and prices only), paper account (simulated) |
 | Run and test | Docker Compose, pytest, ruff, GitHub Actions |
 
 ## Architecture
@@ -125,7 +126,7 @@ flowchart LR
 | Services | `app/services/` | Use cases: analysis, rebalance, approvals, execution, orders, events |
 | Workflow | `app/workflows/` | The LangGraph run |
 | Domain | `app/domain/` | Pure rules and models: money, advice, universe, orders |
-| Ports | `app/ports/` | Interfaces for the model and for order execution |
+| Ports | `app/ports/` | Interfaces for the model, for reading a broker, and for order execution |
 | Adapters | `app/infrastructure/` | One folder per outside system: `iol/`, `ppi/`, `openai/`, `anthropic/` |
 | Config | `config/` | The instrument universe and the model catalog |
 
@@ -178,6 +179,9 @@ uvicorn app.main:app --host 127.0.0.1 --port 8000
 **Tests** (offline: no broker, no model API, no money): `python -m pytest -q`, and
 `ruff check . && ruff format --check .`. CI runs the same on every pull request.
 
+**Upgrading an existing database** (it was created before per-broker credentials): run the two
+`ALTER TABLE` statements in [docs/operations.md](docs/operations.md). A fresh database needs nothing.
+
 ## Real orders
 
 Live orders stay blocked until you set `IOL_LIVE_PLAZO` (for example `t2`) and
@@ -199,6 +203,7 @@ Copy `.env.example` to `.env`. Secrets live only in the environment, never in Gi
 | `OPENAI_API_KEY`, `GEMINI_API_KEY`, `DEEPSEEK_API_KEY`, `XAI_API_KEY`, `MIMO_API_KEY`, `ANTHROPIC_API_KEY` | Only the key of the model you use |
 | `IOL_LIVE_PLAZO`, `IOL_LIVE_VALIDITY_DAYS` | Turn live orders on. Empty keeps them off |
 | `APPROVAL_EXECUTION_WINDOW_HOURS` | How long an approved plan may still be executed (default 24) |
+| `ANALYSIS_MAX_ATTEMPTS` | How many answers one run may ask of the model (default 2; 1 turns the retry off) |
 
 Which instruments and limits to use is in `config/universe.toml`; which models
 appear in the dropdown is in `config/models.toml`. The full list of settings is

@@ -37,6 +37,7 @@ from typing import Any
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
+from app.domain import brokers as broker_kinds
 from app.domain.money import Money, money, quantity
 from app.domain.trading import (
     ExecutionMode,
@@ -155,6 +156,35 @@ def apply_result(order: Order, result: OrderResult) -> Order:
             "message": result.message or order.message,
             "updated_at": datetime.now(UTC),
         }
+    )
+
+
+async def _load_paper_ledger(
+    db: AsyncSession, *, user_id: int, connection: BrokerConnection, country: str
+) -> PaperLedger | None:
+    """The ledger a paper fill is applied to.
+
+    A paper account has its own saved state. For any other connection the
+    ledger is the analysis preview, as before.
+    """
+    if broker_kinds.is_simulated(connection.broker):
+        return await ledger_service.load_paper_account(
+            db, user_id=user_id, connection=connection, country=country
+        )
+    return await ledger_service.load_ledger(
+        db, user_id=user_id, connection=connection, country=country
+    )
+
+
+async def _save_paper_ledger(
+    db: AsyncSession, *, user_id: int, connection: BrokerConnection, ledger: PaperLedger
+) -> PaperLedger:
+    if broker_kinds.is_simulated(connection.broker):
+        return await ledger_service.save_paper_account(
+            db, user_id=user_id, connection=connection, ledger=ledger
+        )
+    return await ledger_service.save_ledger(
+        db, user_id=user_id, connection=connection, ledger=ledger
     )
 
 
@@ -327,7 +357,7 @@ async def submit_proposal_orders(
             db, user_id=user_id, proposal=proposal, proposal_id=proposal_record.id
         )
 
-    ledger = await ledger_service.load_ledger(
+    ledger = await _load_paper_ledger(
         db, user_id=user_id, connection=connection, country=proposal.country
     )
     orders = execution_order(
@@ -458,9 +488,7 @@ async def submit_proposal_orders(
                     filled_quantity=result.filled_quantity,
                     filled_price=result.filled_price or order.limit_price,
                 )
-                await ledger_service.save_ledger(
-                    db, user_id=user_id, connection=connection, ledger=ledger
-                )
+                await _save_paper_ledger(db, user_id=user_id, connection=connection, ledger=ledger)
                 await events_service.record_event(
                     db,
                     user_id=user_id,
@@ -573,7 +601,7 @@ async def execute_single_order(
     if not live and proposal.execution_mode != "PAPER":
         raise ExecutionError(f"Unknown execution mode {proposal.execution_mode!r}.")
 
-    ledger = await ledger_service.load_ledger(
+    ledger = await _load_paper_ledger(
         db, user_id=user_id, connection=connection, country=proposal.country
     )
     cash_limit = None
@@ -674,9 +702,7 @@ async def execute_single_order(
                     filled_quantity=result.filled_quantity,
                     filled_price=result.filled_price or order.limit_price,
                 )
-                await ledger_service.save_ledger(
-                    db, user_id=user_id, connection=connection, ledger=ledger
-                )
+                await _save_paper_ledger(db, user_id=user_id, connection=connection, ledger=ledger)
                 await events_service.record_event(
                     db,
                     user_id=user_id,

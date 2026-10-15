@@ -303,6 +303,9 @@ class Proposal(BaseModel):
     #: The model catalog key this plan was produced with, so a re-run can ask
     #: the same model again. Absent on proposals saved before this was kept.
     model_key: str | None = None
+    #: How many model answers this plan took: 1, or more when an answer was
+    #: sent back with corrections.
+    attempts: int = 1
     approval_mode: ApprovalMode = "HUMAN_IN_THE_LOOP"
     execution_mode: ExecutionMode = "PAPER"
     status: ProposalStatus = "pending_review"

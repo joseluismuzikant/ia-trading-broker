@@ -469,3 +469,29 @@ def test_a_new_position_below_one_unit_is_still_not_executable() -> None:
     blocked = {row.symbol: row for row in result.not_executable}
     assert "YPFD" in blocked
     assert "does not fit" in blocked["YPFD"].reason
+
+
+# --- Feedback for the model --------------------------------------------------
+
+
+def test_correction_notes_name_each_trade_that_cannot_be_filled() -> None:
+    from app.services.rebalance import correction_notes
+
+    # Nothing held, 5% of 16000 is 800: less than one YPFD at 1200.
+    account = ledger("10000.00", [("GGAL", "100", "60.00")])
+    advice = advice_from_targets({"GGAL": 0.375, "YPFD": 0.05}, cash=0.575, current={"GGAL": 0.375})
+
+    notes = correction_notes(plan(advice=advice, account=account))
+
+    assert len(notes) == 1
+    assert notes[0].startswith("YPFD: a target of 5.0% cannot be traded")
+    assert "does not fit" in notes[0]
+
+
+def test_a_plan_that_can_be_filled_needs_no_correction() -> None:
+    from app.services.rebalance import correction_notes
+
+    account = ledger("10000.00", [("GGAL", "100", "60.00")])
+    advice = advice_from_targets({"GGAL": 0.0, "VIST": 0.40}, cash=0.60, current={"GGAL": 0.375})
+
+    assert correction_notes(plan(advice=advice, account=account)) == []

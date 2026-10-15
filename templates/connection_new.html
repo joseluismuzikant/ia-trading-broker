@@ -3,41 +3,84 @@
 
 {% block content %}
 <div class="page-head">
-  <h1>Add an IOL connection</h1>
-  <p>One encrypted login per IOL account. Nothing is read until you refresh.</p>
+  <h1>Add a connection</h1>
+  <p>One encrypted login per account. Nothing is read until you refresh.</p>
 </div>
 
 {% if error %}
 <p class="alert alert--error">{{ error }}</p>
 {% endif %}
 
+<nav class="nav" aria-label="Broker" style="margin-bottom: 1rem;">
+  {% for option in brokers %}
+  <a class="nav__link{% if option.key == kind.key %} nav__link--active{% endif %}"
+     href="/connections/new?broker={{ option.key }}"
+     {% if option.key == kind.key %}aria-current="page"{% endif %}>{{ option.label }}</a>
+  {% endfor %}
+</nav>
+
 <div class="card">
+  <p class="muted">{{ kind.description }}</p>
+  {% if kind.fields %}
   <p class="muted">
-    The password is encrypted before it is saved and is never displayed again.
-    Use a read-only IOL user while the trading features are still being built.
+    Secrets are encrypted before they are saved and are never displayed again.
   </p>
+  {% endif %}
 
   <form method="post" action="/connections" class="form">
     <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+    <input type="hidden" name="broker" value="{{ kind.key }}" />
 
     <div class="field">
       <label class="field__label" for="label">Label</label>
       <input class="field__input" id="label" name="label" maxlength="80" required
-             value="{{ form.label or '' }}" placeholder="My IOL account" />
+             value="{{ form.label or '' }}"
+             placeholder="{{ 'My paper account' if kind.simulated else 'My ' ~ kind.key|upper ~ ' account' }}" />
+    </div>
+
+    {% for spec in kind.fields %}
+    <div class="field">
+      <label class="field__label" for="{{ spec.name }}">{{ spec.label }}</label>
+      <input class="field__input" id="{{ spec.name }}" name="{{ spec.name }}"
+             maxlength="{{ spec.max_length }}" required
+             {% if spec.secret %}type="password" autocomplete="new-password"
+             {% else %}autocomplete="off" value="{{ form.get(spec.name, '') }}"{% endif %} />
+      {% if spec.secret %}<span class="field__hint">Never shown again after saving.</span>{% endif %}
+      {% if spec.hint %}<span class="field__hint">{{ spec.hint }}</span>{% endif %}
+    </div>
+    {% endfor %}
+
+    {% if kind.simulated %}
+    <div class="field">
+      <label class="field__label" for="price_source">Take prices from</label>
+      <select class="field__input" id="price_source" name="price_source" required>
+        {% for source in sources %}
+        <option value="{{ source.id }}" {% if form.price_source == source.id|string %}selected{% endif %}>
+          {{ source.label }} ({{ source.broker|upper }})
+        </option>
+        {% endfor %}
+      </select>
+      <span class="field__hint">
+        {% if sources %}A paper account reads market prices through one of your real connections.
+        {% else %}Add a real connection first: a paper account needs one for prices.{% endif %}
+      </span>
     </div>
 
     <div class="field">
-      <label class="field__label" for="username">IOL username</label>
-      <input class="field__input" id="username" name="username" maxlength="120" required
-             autocomplete="off" value="{{ form.username or '' }}" />
+      <span class="field__label">Starting point</span>
+      <label><input type="radio" name="starting" value="cash"
+             {% if form.starting != 'copy' %}checked{% endif %} /> Start with cash</label>
+      <label><input type="radio" name="starting" value="copy"
+             {% if form.starting == 'copy' %}checked{% endif %} /> Copy the holdings of that account</label>
     </div>
 
     <div class="field">
-      <label class="field__label" for="password">IOL password</label>
-      <input class="field__input" id="password" name="password" type="password" required
-             autocomplete="new-password" />
-      <span class="field__hint">Never shown again after saving.</span>
+      <label class="field__label" for="initial_cash">Starting cash</label>
+      <input class="field__input" id="initial_cash" name="initial_cash" inputmode="decimal"
+             value="{{ form.initial_cash or '100000' }}" />
+      <span class="field__hint">Used when you start with cash.</span>
     </div>
+    {% endif %}
 
     <div class="field">
       <label class="field__label" for="country">Country</label>

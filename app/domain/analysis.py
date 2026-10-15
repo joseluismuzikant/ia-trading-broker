@@ -98,6 +98,9 @@ class PortfolioAnalysisContext:
     constraints: PortfolioConstraints = field(default_factory=PortfolioConstraints)
     #: Things the caller wants the analyst to know, such as a failed read.
     warnings: Sequence[str] = ()
+    #: Why the analyst's previous answer was refused or could not be filled.
+    #: Empty on the first attempt; set only when the answer is being corrected.
+    corrections: Sequence[str] = ()
 
     @property
     def total_value(self) -> float | None:

@@ -6,13 +6,14 @@ no password, no bearer token, and no full response body is ever included.
 
 from __future__ import annotations
 
+from app.ports.broker_reader import BrokerError
 from app.redaction import redact
 
 #: Upper bound for any message we are willing to show or log.
 MAX_MESSAGE_LENGTH = 200
 
 
-class IOLAPIError(Exception):
+class IOLAPIError(BrokerError):
     """Base class for every IOL adapter failure."""
 
     #: Short, safe text that can be shown to the user.

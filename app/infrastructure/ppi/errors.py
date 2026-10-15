@@ -7,9 +7,10 @@ API secret, no bearer token and no full response body is ever included.
 from __future__ import annotations
 
 from app.infrastructure.iol.errors import safe_message
+from app.ports.broker_reader import BrokerError
 
 
-class PPIAPIError(Exception):
+class PPIAPIError(BrokerError):
     """Base class for every PPI adapter failure."""
 
     default_message = "The broker request failed."

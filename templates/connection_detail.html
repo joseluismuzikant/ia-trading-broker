@@ -4,8 +4,14 @@
 {% block content %}
 <div class="page-head">
   <h1>{{ connection.label }}</h1>
-  <p>One saved IOL login and the data read through it.</p>
+  <p>One saved login{% if kind %} ({{ kind.label }}){% endif %} and the data read through it.</p>
 </div>
+
+{% if reset_result == "ok" %}
+<p class="alert alert--ok">The paper account is back at its starting point.</p>
+{% elif reset_result == "failed" %}
+<p class="alert alert--error">The paper account could not be reset. Check that the account it copies has a saved portfolio.</p>
+{% endif %}
 
 {% if test_result == "ok" %}
 <p class="alert alert--ok">The broker accepted the saved login.</p>
@@ -20,9 +26,13 @@
   <article class="card">
     <h2>Connection</h2>
     <dl class="kv">
-      <dt>Broker</dt><dd>{{ connection.broker }}</dd>
-      <dt>Username</dt><dd>{{ connection.username }}</dd>
-      <dt>Password</dt><dd class="muted">stored encrypted &middot; never shown</dd>
+      <dt>Broker</dt><dd>{{ kind.label if kind else connection.broker }}</dd>
+      {% if kind and kind.simulated %}
+      <dt>Type</dt><dd>Simulated: no real orders, no real money</dd>
+      {% else %}
+      <dt>Login</dt><dd>{{ connection.username }}</dd>
+      <dt>Secrets</dt><dd class="muted">stored encrypted &middot; never shown</dd>
+      {% endif %}
       <dt>Country</dt><dd>{{ connection.country }}</dd>
       <dt>Saved</dt><dd>{{ connection.created_at | localtime }}</dd>
       <dt>Last used</dt>
@@ -58,6 +68,7 @@
     </div>
   </article>
 
+  {% if kind and kind.has_account_status %}
   <article class="card">
     <h2>Saved data</h2>
     <dl class="kv">
@@ -95,6 +106,53 @@
       <a class="button button--ghost" href="/portfolio?connection_id={{ connection.id }}">Open portfolio</a>
     </p>
   </article>
+  {% elif paper_account is not none or (kind and kind.simulated) %}
+  <article class="card">
+    <h2>Paper account</h2>
+    {% if paper_account %}
+    <dl class="kv">
+      <dt>Cash</dt><dd>{{ paper_account.cash | money(paper_account.currency) }}</dd>
+      <dt>Positions</dt><dd>{{ paper_account.positions | length }}</dd>
+      <dt>Total value</dt><dd>{{ paper_account.total_value | money(paper_account.currency) }}</dd>
+    </dl>
+    {% if paper_account.positions %}
+    <div class="table-wrap">
+    <table class="table">
+      <thead><tr><th>Symbol</th><th class="num">Quantity</th><th class="num">Last price</th></tr></thead>
+      <tbody>
+        {% for position in paper_account.positions %}
+        <tr>
+          <td>{{ position.symbol }}</td>
+          <td class="num">{{ position.quantity }}</td>
+          <td class="num">{{ position.last_price | money(paper_account.currency) }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    </div>
+    {% endif %}
+    {% else %}
+    <p class="muted">This account has not been started yet. Reset it to start.</p>
+    {% endif %}
+    <p class="muted">Only an approved, executed trade changes it. Reset returns it to where it began.</p>
+    <div class="actions">
+      <form method="post" action="/connections/{{ connection.id }}/reset" class="inline-form"
+            onsubmit="return confirm('Return this paper account to its starting point?');">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+        <button type="submit" class="button button--ghost">Reset to the starting point</button>
+      </form>
+      <a class="button button--ghost" href="/portfolio?connection_id={{ connection.id }}">Open portfolio</a>
+    </div>
+  </article>
+  {% else %}
+  <article class="card">
+    <h2>Saved data</h2>
+    <p class="muted">Nothing is read until you refresh the portfolio.</p>
+    <p class="actions">
+      <a class="button button--ghost" href="/portfolio?connection_id={{ connection.id }}">Open portfolio</a>
+    </p>
+  </article>
+  {% endif %}
 </section>
 
 <p><a href="/connections">&larr; All connections</a></p>

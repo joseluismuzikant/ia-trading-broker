@@ -44,6 +44,7 @@ from app.domain.trading import (
     RiskCheck,
 )
 from app.domain.universe import DEFAULT_MARKET, UniverseConfig, get_universe
+from app.infrastructure.iol import price_bar_from_quote
 from app.infrastructure.iol.schemas import Quote
 from app.models import (
     EVENT_PROPOSAL,
@@ -51,6 +52,7 @@ from app.models import (
     ProposalRecord,
     price_history_kind,
 )
+from app.ports.broker_reader import PriceBar
 from app.services import advice as advice_service
 from app.services import approvals as approvals_service
 from app.services import broker as broker_service
@@ -80,25 +82,34 @@ def load_config() -> UniverseConfig:
     return get_universe(path)
 
 
-def evidence_for(quotes: list[Quote]) -> IndicatorEvidence:
+def _price_bar(item: PriceBar | Quote) -> PriceBar:
+    """A price bar, whichever shape the caller has.
+
+    The broker port returns :class:`PriceBar`. An IOL quote row (older saved
+    data, and tests that build one) is converted rather than rejected.
+    """
+    return item if isinstance(item, PriceBar) else price_bar_from_quote(item)
+
+
+def evidence_for(quotes: Sequence[PriceBar | Quote]) -> IndicatorEvidence:
     """Compute the indicator readings for one instrument's price history.
 
-    Quotes arrive newest-first or oldest-first depending on the broker, so they
+    Bars arrive newest-first or oldest-first depending on the broker, so they
     are ordered by their timestamp before anything is calculated. A history that
     is too short produces readings of ``None``, which the strategy treats as "not
     enough evidence" rather than as a trade.
     """
-    ordered = sorted(quotes, key=lambda quote: quote.fecha_hora or "")
-    closes = [quote.ultimo_precio for quote in ordered if quote.ultimo_precio]
+    ordered = sorted((_price_bar(item) for item in quotes), key=lambda bar: bar.at or "")
+    closes = [bar.close for bar in ordered if bar.close]
     bars = [
         Bar(
-            close=quote.ultimo_precio,
-            high=quote.maximo if quote.maximo is not None else quote.ultimo_precio,
-            low=quote.minimo if quote.minimo is not None else quote.ultimo_precio,
-            volume=quote.volumen_nominal,
+            close=bar.close,
+            high=bar.high if bar.high is not None else bar.close,
+            low=bar.low if bar.low is not None else bar.close,
+            volume=bar.volume,
         )
-        for quote in ordered
-        if quote.ultimo_precio
+        for bar in ordered
+        if bar.close
     ]
 
     momentum = latest(macd(closes))
@@ -198,6 +209,8 @@ def build_rebalance_proposal(
     evidence: Mapping[str, IndicatorEvidence],
     warnings: Sequence[str] = (),
     model_key: str | None = None,
+    attempts: int = 1,
+    execution_mode: str = "LIVE",
 ) -> Proposal:
     """Assemble the immutable plan a human reviews from one rebalance.
 
@@ -224,7 +237,8 @@ def build_rebalance_proposal(
         country=plan.ledger_before.country,
         currency=plan.ledger_before.currency,
         model_key=model_key,
-        execution_mode="LIVE",
+        attempts=attempts,
+        execution_mode=execution_mode,
         portfolio_value=plan.portfolio_value,
         cash=plan.ledger_before.cash,
         advice=advice_view,
@@ -266,7 +280,7 @@ def build_rebalance_proposal(
     )
 
 
-def _history_warnings(wanted: set[str], history: dict[str, list[Quote]]) -> list[str]:
+def _history_warnings(wanted: set[str], history: dict[str, list[PriceBar]]) -> list[str]:
     """What the model should know about instruments it has no data for."""
     return [
         f"No price history is saved for {symbol}."
@@ -332,9 +346,9 @@ async def load_history(
     user_id: int,
     connection: BrokerConnection,
     symbols: set[str],
-) -> dict[str, list[Quote]]:
+) -> dict[str, list[PriceBar]]:
     """Read the saved price history for the given symbols."""
-    history: dict[str, list[Quote]] = {}
+    history: dict[str, list[PriceBar]] = {}
     for symbol in sorted(symbols):
         snapshot = await snapshots_service.latest_snapshot(
             db,
@@ -344,7 +358,7 @@ async def load_history(
         )
         if snapshot is None:
             continue
-        history[symbol] = broker_service.quotes_from_snapshot(snapshot)
+        history[symbol] = broker_service.bars_from_snapshot(snapshot)
     return history
 
 

@@ -2,7 +2,7 @@
    logins. Shared by the Profile page and the standalone connections page.
    Expects: connections, csrf_token. #}
 <div class="toolbar">
-  <span class="muted">Saved IOL logins &mdash; the password is stored encrypted
+  <span class="muted">Saved broker logins &mdash; secrets are stored encrypted
     and never shown again.</span>
   <a class="button" href="/connections/new">Add a connection</a>
 </div>
@@ -56,6 +56,6 @@
 </div>
 {% else %}
 <p class="alert alert--info">
-  No connection yet. Add your IOL login to read your profile and account status.
+  No connection yet. Add your broker login to read your account, or a paper account to try plans without real money.
 </p>
 {% endif %}

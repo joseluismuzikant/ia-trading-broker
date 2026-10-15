@@ -14,8 +14,10 @@ the app working, the test suite green, and an acceptance check.
 These invariants hold in every phase. A change that breaks one is wrong even
 if its tests pass.
 
-1. **One model call per run.** `analyse_portfolio` is the only node that talks
-   to a model. The whole account goes in and one target allocation comes out.
+1. **One model-calling node per run.** `analyse_portfolio` is the only node
+   that talks to a model. The whole account goes in and one target allocation
+   comes out; a refused or unfillable answer is sent back with the reasons, at
+   most `ANALYSIS_MAX_ATTEMPTS` (default 2) answers in all.
 2. **The model advises, Python decides.** The model returns target weights,
    reasons and risks. It never supplies quantities, prices or broker requests.
    `services/rebalance.py` is the only place that turns weights into trades.
@@ -358,29 +360,48 @@ one wins.
 
 ### Phase 1 — Multi-broker and PPI
 
-- [ ] `BrokerReader` port; move IOL reads behind `IOLBroker`.
-- [ ] Per-broker encrypted credentials on `broker_connections` (the
-      `broker` column already exists, default `iol`); a connection form driven by each broker's fields.
+- [x] `BrokerReader` port (`app/ports/broker_reader.py`); IOL reads moved behind
+      `IOLBroker`, which owns the login, the token cache and the single retry.
+      Services read through `open_reader` in `app/services/broker.py`.
+- [x] Per-broker encrypted credentials on `broker_connections`
+      (`credentials_encrypted`; the `broker` column already existed), and a
+      connection form driven by each broker's fields (`app/domain/brokers.py`).
 - [ ] `PPIBroker` and `PPIOrderExecutor` over PPI's REST API, following the
       Postman collection and `ppi_rest_openapi_with_examples.json` (both kept
-      locally in the git-ignored `postman/` folder)
-      (account number plus public and private API keys). Recorded fixtures.
+      locally in the git-ignored `postman/` folder; account number plus public
+      and private API keys).
       - [x] `app/infrastructure/ppi/`: client (login, refresh, accounts, cash,
             quotes, history, order detail, budget, confirm) and
             `PPIOrderExecutor`, tested offline.
+      - [x] `PPIBroker` reads what PPI documents (login, cash that settles at
+            once, daily prices for shares, an order's detail) and is in the
+            registry, so a PPI connection can be saved and tested.
       - [ ] Positions: neither the OpenAPI file nor the Swagger schema for
             `BalancesAndPositions` has a holdings list (only `currency` and
-            `availability`); needs a real response, or another endpoint,
-            before `PPIBroker` can read a portfolio.
+            `availability`). `PPIBroker.get_portfolio` refuses instead of
+            guessing, so a PPI account cannot be analysed yet. Needs a real
+            response, or another endpoint.
       - [ ] Order status vocabulary and bond/CEDEAR conventions, to be taken
             from real responses; until then only shares are mapped.
-      - [ ] Wire into the broker registry once `broker_type` exists.
-- [ ] `PaperBroker`: paper accounts with an initial balance or a copy of a
-      real account's portfolio, and a reset action.
+      - [ ] Wire `PPIOrderExecutor` into execution (`can_trade` is false for
+            PPI), once positions and order states are known.
+- [x] `PaperBroker`: a paper account with its own saved state, started from
+      cash or a copy of a real account's holdings, priced through one of the
+      user's real connections, with a reset action. Its fills change only that
+      state, never the per-run preview and never a broker.
 - [ ] Currency on `Money`; ARS and USD balances side by side.
+      - [x] `Money` carries an optional currency; amounts in different
+            currencies can never be added, compared or treated as equal.
+      - [x] The port reports cash per currency (`CashBalance`), mapped from
+            IOL's names (`Peso_Argentino`, `Dolar_Estadounidense`).
+      - [ ] The ledger and the rebalance are still single-currency, and no
+            page shows ARS and USD cash side by side outside IOL's own account
+            page.
 
 **Acceptance:** a user sees and analyses a PPI account and a paper account;
 approving a small PPI proposal sends a real order with its operation number.
+*Met for the paper account. Not met for PPI*: it can be saved, tested and read
+for cash and prices, but not analysed, and no PPI order can be sent.
 
 ### Phase 2 — Strategies
 
@@ -390,7 +411,7 @@ approving a small PPI proposal sends a real order with its operation number.
       AL30/AL30D/AL30C prices.
 - [ ] `app/domain/strategies.py` with the five profiles; band gaps in the
       analysis context; strategy rules in `advice_validation.py`; the retry
-      edge in the graph.
+      edge in the graph (the retry edge itself is already done, see section 8).
 - [ ] `user_settings` with a default strategy and per-user limits.
 - [ ] Analysis form: strategy picker with its description and bands; review
       page shows the composition by group against the bands.
@@ -473,7 +494,7 @@ return.
 ## 8. Status and remaining work
 
 State of the branch `feature/claude-refactoring-01`. Tests are offline and
-passing (635), ruff and CI are in place. What is **not** verified is listed
+passing (767), ruff and CI are in place. What is **not** verified is listed
 last, because a green suite does not prove any of it.
 
 ### Done
@@ -489,8 +510,13 @@ last, because a green suite does not prove any of it.
   and is only offered instruments the account can buy (one unit within the
   position limit, with a known price). A held position within one unit of its
   target is a hold, not a failure.
-- **PPI adapter (not wired in):** REST client and order executor, tested
-  against a mock transport.
+- **Phase 1, mostly:** the `BrokerReader` port with IOL, PPI and paper
+  adapters behind a registry; per-broker encrypted credentials and a form that
+  follows the chosen broker; paper accounts; currency on `Money`. PPI can be
+  saved, tested and read for cash and prices, but not analysed (no holdings in
+  its schema) and not traded.
+- **Retry edge (Phase 2):** a refused or unfillable model answer is sent back
+  with the reasons, bounded by `ANALYSIS_MAX_ATTEMPTS`.
 - **UI:** dashboard with real numbers and a next-step prompt, a progress bar on
   the proposal page, a clearer Not executable table.
 
@@ -503,17 +529,19 @@ last, because a green suite does not prove any of it.
    events and traces. Still open: an order that never got an operation number
    cannot be resolved inside the app (manual resolution with a note is
    Phase 4).
-2. **Retry edge** from `validate_advice` to `analyse_portfolio` (Phase 2): send
-   the validation errors back so a plan the planner cannot fill is corrected
-   by the model instead of ending as NOT EXECUTABLE. A new position whose
-   target is below one unit is still NOT EXECUTABLE today; add a check that
-   rejects weights below one unit.
+2. **Retry edge** is done: `validate_advice` runs a dry run of the planner and
+   sends a refused or unfillable answer back to `analyse_portfolio` with the
+   reasons (`corrections`), at most `ANALYSIS_MAX_ATTEMPTS` answers in all. If
+   attempts run out, the proposal is still saved and lists what cannot be
+   traded as NOT EXECUTABLE. The proposal records `attempts`. Not yet done:
+   token and duration per attempt (Phase 3).
 3. **UI follow-ups:** buttons for the phase routes and `resume`; a "run again
    with the same model" action (the proposal already stores `model_key`);
    remove the legacy funnel tables from `analysis.html` and the stale funnel and
    finalist text in `help.html`.
-4. **Phase 1 groundwork that needs no PPI data:** the `BrokerReader` port and
-   `IOLBroker`, per-broker credentials, `PaperBroker`, currency on `Money`.
+4. **Phase 1 leftovers:** a PPI portfolio reader (blocked on a real positions
+   response), PPI order states and the PPI executor wiring, and ARS and USD
+   side by side through the ledger and rebalance.
 5. **Phase 4 reconciliation job**, then the Orders and Activity pages.
 6. Phases 2, 3 (rest), 5, 6, 7 as listed above.
 
