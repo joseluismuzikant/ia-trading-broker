@@ -77,6 +77,11 @@ class Settings(BaseSettings):
     #: it and a new analysis is needed.
     approval_execution_window_hours: int = Field(default=24, ge=1, le=24 * 7)
 
+    # --- Analysis ------------------------------------------------------------
+    #: How many times one run may ask the model. A refused or unfillable answer
+    #: is sent back once with the reasons; this bounds that loop. 1 disables it.
+    analysis_max_attempts: int = Field(default=2, ge=1, le=3)
+
     # --- Trading universe ------------------------------------------------
     #: Where the universe and portfolio limits are declared. Empty means the
     #: file shipped with the application (``config/universe.toml``).

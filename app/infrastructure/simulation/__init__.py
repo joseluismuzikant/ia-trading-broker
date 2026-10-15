@@ -7,6 +7,7 @@ flow can run and be tested offline.
 """
 
 from app.infrastructure.simulation.paper import PaperOrderExecutor
+from app.infrastructure.simulation.paper_broker import PaperBroker
 from app.infrastructure.simulation.portfolio_advisor import (
     FakePortfolioAdvisor,
     advice_from_targets,
@@ -15,6 +16,7 @@ from app.infrastructure.simulation.portfolio_advisor import (
 
 __all__ = [
     "FakePortfolioAdvisor",
+    "PaperBroker",
     "PaperOrderExecutor",
     "advice_from_targets",
     "keep_portfolio",

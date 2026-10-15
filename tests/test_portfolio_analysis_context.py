@@ -120,6 +120,7 @@ def test_the_context_carries_no_credentials() -> None:
         "watchlist",
         "constraints",
         "warnings",
+        "corrections",  # reasons an earlier answer was sent back; redacted text only
     }
     for name in ("api_key", "token", "password", "username", "session"):
         assert not hasattr(view, name)

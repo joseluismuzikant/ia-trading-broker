@@ -33,8 +33,11 @@ Python 3.12. Install with `python -m pip install -r requirements-dev.txt`.
 
 ## Invariants — never break these
 
-1. **One model call per run.** `analyse_portfolio` in
-   `app/workflows/trading_flow.py` is the only node that calls a model.
+1. **One model-calling node per run.** `analyse_portfolio` in
+   `app/workflows/trading_flow.py` is the only node that calls a model. The
+   whole account goes in once; a refused or unfillable answer may be sent back
+   with the reasons, at most `ANALYSIS_MAX_ATTEMPTS` times in all (default 2).
+   A run still ends with at most one proposal.
 2. **The model advises, Python decides.** A model returns target weights,
    reasons and risks (`PortfolioAdvice`). It never supplies quantities, prices
    or broker requests. `app/services/rebalance.py` is the only place that turns
@@ -59,7 +62,7 @@ Python 3.12. Install with `python -m pip install -r requirements-dev.txt`.
 | Layer | Path | Rule |
 |---|---|---|
 | Domain | `app/domain/` | Pure: Pydantic models, `Money`, indicators, contracts. No I/O |
-| Ports | `app/ports/` | Protocols (`PortfolioAdvisor`, `OrderExecutor`; `BrokerReader` from phase 1) |
+| Ports | `app/ports/` | Protocols (`PortfolioAdvisor`, `OrderExecutor`, `BrokerReader`) |
 | Infrastructure | `app/infrastructure/` | One package per external system (`iol/`, `openai/`, `simulation/`). The only code that knows a vendor's field names, endpoints or SDK |
 | Services | `app/services/` | Use cases, transactions, events |
 | Workflow | `app/workflows/trading_flow.py` | The LangGraph `Run`. Nodes call services; nodes do not talk to vendors directly |

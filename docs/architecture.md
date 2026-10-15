@@ -36,14 +36,35 @@ OrderExecutor
 ├── PaperOrderExecutor        simulated fills
 ├── IOLOrderExecutor          live IOL orders (fail-closed preflight)
 └── PPIOrderExecutor          Budget then Confirm; built and tested, not yet selectable
+
+BrokerReader                   read one account: portfolio, cash, prices, an operation
+├── IOLBroker                 IOL; owns the login, the token cache and the single retry
+├── PPIBroker                 PPI; cash and prices only, positions fail closed
+└── PaperBroker               a simulated account, priced through a real connection
 ```
 
+**Choosing a broker.** A connection names its broker (`iol`, `ppi`, `paper`).
+`app/domain/brokers.py` says what each one needs (its credential fields) and
+what it can do. `open_reader` in `app/services/broker.py` returns the adapter,
+so a service reads a portfolio or a price history without knowing whose it is.
+IOL keeps its login in `username` and `password_encrypted`; every other broker
+keeps all its fields in one encrypted JSON value, `credentials_encrypted`.
+
+**Paper accounts.** A paper account has its own saved state (the snapshot kind
+`paper_account:{country}`), started from a cash amount or a copy of a real
+account's holdings, and priced through one of the user's real connections. It
+is kept apart from the per-run preview ledger, which every analysis rebuilds,
+so an unapproved plan never changes the account. Its proposals run in `PAPER`
+mode: the same review and approval, fills applied locally, and no broker
+involved.
+
 **PPI.** `app/infrastructure/ppi/` follows PPI's Postman collection and the
-OpenAPI file in `docs/`. It has the client (login, refresh, accounts, cash,
-quotes, history, order detail, budget, confirm) and the executor. It is not
-wired to a connection yet: PPI's published schema has no list of holdings, so a
-portfolio reader waits for real sandbox responses. See the
-[roadmap](roadmap.md).
+OpenAPI file (kept locally in `postman/`). It has the client (login, refresh,
+accounts, cash, quotes, history, order detail, budget, confirm), the executor,
+and `PPIBroker`. A PPI connection can be saved, tested, and read for cash and
+prices. PPI's published schema has no list of holdings, so a PPI portfolio
+cannot be read and a PPI account cannot be analysed yet, and no PPI order can
+be sent. See the [roadmap](roadmap.md).
 
 Python validates the allocation and owns execution. The model cannot supply
 quantities, prices, or broker requests.
@@ -70,9 +91,13 @@ sequenceDiagram
     Graph->>Reads: account status + portfolio + daily history
     Reads-->>Graph: snapshots (or stale fallback + warning)
     Graph->>DB: NEW PaperLedger from the current portfolio
-    Graph->>Model: analyse_portfolio(context), ONE call
+    Graph->>Model: analyse_portfolio(context)
     Model-->>Graph: PortfolioAdvice (target weights)
-    Graph->>Graph: validate_advice()
+    Graph->>Graph: validate_advice() and a dry run of the planner
+    opt refused or unfillable, and attempts remain
+        Graph->>Model: analyse_portfolio(context + corrections)
+        Model-->>Graph: corrected PortfolioAdvice
+    end
     Graph->>Rebalance: plan_rebalance(advice, ledger, prices, universe)
     Rebalance-->>Graph: sells first, then buys (whole units), rows it cannot size are NOT EXECUTABLE
     Graph->>DB: Proposal (before / after) + approval request, pause
@@ -352,6 +377,17 @@ classDiagram
         <<interface>>
         +analyze(context) PortfolioAdvice
     }
+    class BrokerReader {
+        <<interface>>
+        +authenticate()
+        +get_portfolio(country) Portfolio
+        +get_balances() CashBalance[]
+        +get_history(symbol, market, days) PriceBar[]
+        +get_operation(id)
+    }
+    class IOLBroker
+    class PPIBroker
+    class PaperBroker
     class OrderExecutor {
         <<interface>>
         +submit(order) OrderResult
@@ -390,6 +426,12 @@ classDiagram
     OpenAIPortfolioAdvisor --> AnthropicClient : api = anthropic
     OpenAIPortfolioAdvisor --> AnalysisModel : catalog entry
     FakePortfolioAdvisor --> AnalysisModel : catalog entry
+    BrokerReader <|.. IOLBroker : IOL
+    BrokerReader <|.. PPIBroker : cash and prices
+    BrokerReader <|.. PaperBroker : simulated account
+    PaperBroker --> BrokerReader : prices from a real connection
+    IOLBroker --> IOLClient
+    PPIBroker --> PPIClient
     OrderExecutor <|.. PaperOrderExecutor : simulated fills
     OrderExecutor <|.. IOLOrderExecutor : live IOL orders
     OrderExecutor <|.. PPIOrderExecutor : not yet wired

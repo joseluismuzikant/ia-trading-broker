@@ -42,6 +42,16 @@ def ledger_snapshot_kind(country: str) -> str:
     return f"paper_ledger:{country}"
 
 
+def paper_account_snapshot_kind(country: str) -> str:
+    """The saved state of a paper account, for one country.
+
+    This is kept apart from the paper ledger above on purpose: every analysis
+    rebuilds that ledger as a *preview* of unapproved trades, while this is the
+    account itself, which only an approved, executed trade may change.
+    """
+    return f"paper_account:{country}"
+
+
 #: A proposal is the complete trade plan. It is inserted once and never updated,
 #: so the plan a user reviews cannot drift from the plan that was risk-checked.
 PROPOSAL_PENDING = "pending_review"
@@ -138,7 +148,14 @@ class BrokerConnection(Base):
     label: Mapped[str] = mapped_column(String(80))
     country: Mapped[str] = mapped_column(String(32), default="argentina")
     username: Mapped[str] = mapped_column(String(120))
-    password_encrypted: Mapped[str] = mapped_column(Text)
+    #: The IOL password, as Fernet ciphertext. Empty for brokers that keep their
+    #: login in ``credentials_encrypted`` instead.
+    password_encrypted: Mapped[str] = mapped_column(Text, default="")
+    #: Every field a non-IOL broker needs (API keys, account number, options),
+    #: as one Fernet-encrypted JSON object. Never logged, never rendered.
+    credentials_encrypted: Mapped[str | None] = mapped_column(Text, default=None)
+    #: For a paper account: the real connection whose prices it uses. Optional.
+    price_source_connection_id: Mapped[int | None] = mapped_column(Integer, default=None)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(

@@ -26,12 +26,14 @@ instead of quietly simulating anything.
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any, TypedDict
 
 from langgraph.graph import END, START, StateGraph
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import get_settings
+from app.domain import brokers as broker_kinds
 from app.domain.portfolio import Portfolio
 from app.domain.trading import Proposal
 from app.models import (
@@ -43,6 +45,7 @@ from app.models import (
     EVENT_RUN,
     BrokerConnection,
 )
+from app.redaction import redact
 from app.services import advice as advice_service
 from app.services import analysis as analysis_service
 from app.services import approvals as approvals_service
@@ -95,6 +98,11 @@ class TradingState(TypedDict, total=False):
     model: Any
     advice: Any
     advice_view: Any
+    #: Which model answer this is (1 on the first), and whether the last answer
+    #: is being sent back with the reasons in ``corrections``.
+    attempt: int
+    retry: bool
+    corrections: Any
 
 
 @dataclass
@@ -158,11 +166,13 @@ class Run:
         )
         warnings: list[str] = []
 
-        account = await broker_service.read_account_status(
-            self.db, user_id=self.user_id, connection=self.connection
-        )
-        if not account.ok:
-            warnings.append(f"The account status could not be refreshed ({account.error}).")
+        kind = broker_kinds.kind_of(self.connection.broker)
+        if kind is not None and kind.has_account_status:
+            account = await broker_service.read_account_status(
+                self.db, user_id=self.user_id, connection=self.connection
+            )
+            if not account.ok:
+                warnings.append(f"The account status could not be refreshed ({account.error}).")
 
         portfolio_read = await broker_service.read_portfolio(
             self.db, user_id=self.user_id, connection=self.connection, country=self.country
@@ -270,15 +280,28 @@ class Run:
         }
 
     async def analyse_portfolio(self, state: TradingState) -> dict[str, object]:
-        """The ONE model call: the whole portfolio in, one target allocation out."""
+        """The model call: the whole portfolio in, one target allocation out.
+
+        This is the only node that talks to a model. A refused or unfillable
+        answer comes back here at most ``analysis_max_attempts`` times in all,
+        with the reasons, so a run never asks without bound.
+        """
+        attempt = state.get("attempt") or 1
+        limit = get_settings().analysis_max_attempts
+        corrections = tuple(state.get("corrections") or ())
+        context = state["context"]
+        if corrections:
+            context = replace(context, corrections=corrections)
         await self.record(
             EVENT_RUN,
             "ai.analysis.started",
-            f"Asking the portfolio analyst for {self.country}.",
+            f"Asking the portfolio analyst for {self.country}."
+            if attempt == 1
+            else f"Asking the portfolio analyst again with corrections (attempt {attempt} of {limit}).",
             mode="LIVE",
         )
         try:
-            model, advice = await analysis_service.ask_advisor(self.model_key, state["context"])
+            model, advice = await analysis_service.ask_advisor(self.model_key, context)
         except analysis_service.AnalysisError as exc:
             await self.record(EVENT_RUN, "ai.analysis.failed", str(exc), mode="LIVE")
             return {"status": STATUS_FAILED, "message": str(exc)}
@@ -288,10 +311,21 @@ class Run:
             f"{model.label} answered with {len(advice.decisions)} decision(s).",
             mode="LIVE",
         )
-        return {"model": model, "advice": advice}
+        return {"model": model, "advice": advice, "retry": False, "attempt": attempt}
 
     async def validate_advice(self, state: TradingState) -> dict[str, object]:
-        """Refuse any target allocation that does not fit the account."""
+        """Refuse an answer that does not fit the account, or that cannot be traded.
+
+        Two checks, both deterministic: the answer must fit the account, and a
+        dry run of the planner must be able to fill what it asks for. When
+        either fails and attempts remain, the reasons go back to the model; the
+        run never grows past ``analysis_max_attempts`` answers.
+        """
+        attempt = state.get("attempt") or 1
+        limit = get_settings().analysis_max_attempts
+        earlier = list(state.get("corrections") or [])
+        advice_view = None
+        problems: list[str] = []
         try:
             advice_view = analysis_service.validate_advice(
                 state["advice"],
@@ -300,8 +334,52 @@ class Run:
                 universe=analysis_service.load_config(),
             )
         except analysis_service.AnalysisError as exc:
-            await self.record(EVENT_RUN, "advice.rejected", str(exc), mode="LIVE")
-            return {"status": STATUS_FAILED, "message": str(exc)}
+            problems = [str(exc)]
+        else:
+            try:
+                dry_run = rebalance_service.plan_rebalance(
+                    advice=state["advice"],
+                    ledger=state["ledger_before"],
+                    universe=analysis_service.load_config(),
+                    prices=state.get("prices") or {},
+                )
+            except rebalance_service.RebalanceError as exc:
+                await self.record(
+                    EVENT_RUN,
+                    "advice.rejected",
+                    f"The allocation could not be applied: {exc}",
+                    mode="LIVE",
+                )
+                return {"status": STATUS_FAILED, "message": str(exc)}
+            problems = rebalance_service.correction_notes(dry_run)
+
+        # These go back to a provider, so nothing credential-shaped may ride along.
+        problems = [redact(problem) for problem in problems]
+        if problems and attempt < limit:
+            await self.record(
+                EVENT_RUN,
+                "advice.retry",
+                f"Answer {attempt} of {limit} sent back: " + " | ".join(problems),
+                mode="LIVE",
+            )
+            return {"retry": True, "attempt": attempt + 1, "corrections": problems}
+
+        if advice_view is None:
+            # Refused, and no attempts are left: the run stops without a proposal.
+            await self.record(EVENT_RUN, "advice.rejected", problems[0], mode="LIVE")
+            return {"status": STATUS_FAILED, "message": problems[0], "retry": False}
+
+        warnings = list(state.get("warnings") or [])
+        if attempt > 1:
+            warnings.append(
+                f"The model's first answer was sent back {attempt - 1} time(s) and "
+                "corrected. Reasons: " + " | ".join(earlier)
+            )
+        if problems:
+            warnings.append(
+                f"After {attempt} answer(s) some targets still cannot be traded; "
+                "they are listed as not executable."
+            )
         await self.record(
             EVENT_RUN,
             "advice.validated",
@@ -310,7 +388,7 @@ class Run:
             f"{len(advice_view.decisions)} decision(s).",
             mode="LIVE",
         )
-        return {"advice_view": advice_view}
+        return {"advice_view": advice_view, "retry": False, "warnings": warnings}
 
     async def apply_to_paper_ledger(self, state: TradingState) -> dict[str, object]:
         """Size the rebalance, apply it to the paper preview, save the plan.
@@ -340,6 +418,8 @@ class Run:
             evidence=state.get("evidence") or {},
             warnings=state.get("warnings") or [],
             model_key=getattr(state.get("model"), "key", None),
+            attempts=state.get("attempt") or 1,
+            execution_mode="PAPER" if broker_kinds.is_simulated(self.connection.broker) else "LIVE",
         )
         await ledger_service.save_ledger(
             self.db,
@@ -460,8 +540,9 @@ class Run:
         side = "BUY" if phase == "buys" else "SELL"
 
         cash_limit = None
-        if side == "BUY":
-            # Real buying power, refreshed from the broker before any buy.
+        if side == "BUY" and proposal.execution_mode == "LIVE":
+            # Real buying power, refreshed from the broker before any buy. A paper
+            # account has no broker to ask: its own cash is the limit.
             await broker_service.read_account_status(
                 self.db, user_id=self.user_id, connection=self.connection
             )
@@ -569,6 +650,13 @@ def route_ok(state: TradingState) -> str:
     return "failed" if state.get("status") == STATUS_FAILED else "ok"
 
 
+def route_after_validation(state: TradingState) -> str:
+    """Back to the model with corrections, on to the plan, or stop."""
+    if state.get("status") == STATUS_FAILED:
+        return "failed"
+    return "retry" if state.get("retry") else "ok"
+
+
 def route_after_approval(state: TradingState) -> str:
     return "execute_live" if state.get("approval_status") == APPROVAL_APPROVED else "end"
 
@@ -611,10 +699,14 @@ def build_graph(
         "build_analysis_context",
         "analyse_portfolio",
         "validate_advice",
-        "apply_to_paper_ledger",
     ]
     for node, following in zip(chain, chain[1:], strict=False):
         graph.add_conditional_edges(node, route_ok, {"failed": END, "ok": following})
+    graph.add_conditional_edges(
+        "validate_advice",
+        route_after_validation,
+        {"retry": "analyse_portfolio", "failed": END, "ok": "apply_to_paper_ledger"},
+    )
     graph.add_conditional_edges(
         "apply_to_paper_ledger", route_ok, {"failed": END, "ok": "request_approval"}
     )

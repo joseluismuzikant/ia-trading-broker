@@ -12,6 +12,8 @@
       </span>
       {% if proposal.execution_mode == 'LIVE' %}
       <span class="badge badge--danger" title="Orders are sent to the real broker.">LIVE TRADING</span>
+      {% else %}
+      <span class="badge badge--info" title="Simulated: nothing is sent to a broker.">PAPER</span>
       {% endif %}
       &middot; Created {{ proposal_record.created_at | localtime }}
       {% if model_label %}&middot; Model: <strong>{{ model_label }}</strong>{% endif %}
@@ -323,12 +325,20 @@
 </p>
 {% elif approval.status == "pending" %}
 <section class="card card--tight">
+  {% if proposal.execution_mode == 'LIVE' %}
   <p class="alert alert--warn">
     <strong>These are real orders.</strong>
     Approving records your decision. It sends nothing by itself — each trade
     below is executed separately, at the amount you choose, whenever the
     portfolio allows it. Rejecting sends nothing.
   </p>
+  {% else %}
+  <p class="alert alert--info">
+    <strong>This is a paper account.</strong>
+    Nothing real is sent to any broker. Approving records your decision, and
+    each trade you execute only changes the simulated account.
+  </p>
+  {% endif %}
   <div class="actions">
     <form method="post" action="/proposals/{{ proposal_record.id }}/reject" class="inline-form">
       <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />

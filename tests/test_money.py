@@ -88,3 +88,102 @@ def test_money_survives_a_pydantic_json_round_trip() -> None:
     assert dumped == {"amount": "1234.56"}
     restored = _Payload.model_validate(dumped)
     assert restored.amount == original.amount
+
+
+# --- Currency ------------------------------------------------------------------
+
+from pydantic import BaseModel  # noqa: E402
+
+from app.domain.money import (  # noqa: E402
+    ARS,
+    USD,
+    CurrencyMismatchError,
+    normalise_currency,
+)
+
+
+class _Holder(BaseModel):
+    amount: Money
+
+
+def test_money_without_a_currency_behaves_as_before() -> None:
+    assert (money("10.00") + money("2.50")).currency is None
+    assert money("10.00") == money("10.00")
+    assert str(money("10.5")) == "10.50"
+
+
+def test_an_amount_without_a_currency_adopts_the_other_ones() -> None:
+    total = money("10.00", ARS) + money("2.50")
+
+    assert total == money("12.50", ARS)
+    assert total.currency == ARS
+    assert (money("2.50") - money("1.00", USD)).currency == USD
+
+
+def test_scaling_keeps_the_currency() -> None:
+    assert (money("2.00", USD) * 3).currency == USD
+    assert (-money("2.00", USD)).currency == USD
+    assert abs(money("-2.00", ARS)).currency == ARS
+
+
+def test_different_currencies_are_never_combined() -> None:
+    pesos, dollars = money("100.00", ARS), money("100.00", USD)
+
+    for operation in (
+        lambda: pesos + dollars,
+        lambda: pesos - dollars,
+        lambda: pesos < dollars,
+        lambda: pesos >= dollars,
+        lambda: pesos / dollars,
+    ):
+        with pytest.raises(CurrencyMismatchError):
+            operation()
+
+
+def test_different_currencies_are_never_equal() -> None:
+    assert money("100.00", ARS) != money("100.00", USD)
+    assert money("100.00", ARS) == money("100.00", ARS)
+
+
+def test_relabelling_money_in_another_currency_is_refused() -> None:
+    assert money("5.00").with_currency(USD).currency == USD
+    with pytest.raises(CurrencyMismatchError):
+        money("5.00", ARS).with_currency(USD)
+
+
+@pytest.mark.parametrize(
+    ("name", "code"),
+    [
+        ("Peso_Argentino", ARS),
+        ("peso_argentino", ARS),
+        ("ARS", ARS),
+        ("Dolar_Estadounidense", USD),
+        ("usd", USD),
+        ("eur", "EUR"),
+    ],
+)
+def test_broker_currency_names_map_to_one_code(name, code) -> None:
+    assert normalise_currency(name) == code
+
+
+def test_a_missing_currency_stays_missing() -> None:
+    assert normalise_currency(None) is None
+    assert normalise_currency("  ") is None
+
+
+def test_an_amount_without_a_currency_is_stored_as_the_plain_string_it_always_was() -> None:
+    assert _Holder(amount=money("12.30")).model_dump(mode="json") == {"amount": "12.30"}
+
+
+def test_an_amount_with_a_currency_keeps_it_through_json() -> None:
+    stored = _Holder(amount=money("12.30", USD)).model_dump(mode="json")
+
+    assert stored == {"amount": {"amount": "12.30", "currency": "USD"}}
+    assert _Holder.model_validate(stored).amount == money("12.30", USD)
+    assert _Holder.model_validate(stored).amount.currency == USD
+
+
+def test_an_older_stored_amount_still_loads() -> None:
+    assert _Holder.model_validate({"amount": "99.90"}).amount == money("99.90")
+    assert _Holder.model_validate({"amount": 99.9}).amount == money("99.90")
+    assert Money(money("1.00").amount).currency is None

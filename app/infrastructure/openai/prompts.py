@@ -16,7 +16,7 @@ import json
 from app.domain.analysis import ALLOCATION_TOLERANCE, PortfolioAnalysisContext
 
 #: Bump when the wording below changes in a way that can move an answer.
-ANALYSIS_PROMPT_VERSION = "rebalance-v2"
+ANALYSIS_PROMPT_VERSION = "rebalance-v3"
 
 #: Provenance the answer is stamped with; the model cannot choose it.
 PROVIDER = "openai"
@@ -45,6 +45,10 @@ than "one_unit_weight" cannot be traded, so keep the current weight instead. \
 Never target an instrument whose "one_unit_weight" is above \
 "max_single_position_pct": it can never be bought. When "unit_cost" is null \
 the price is unknown, so do not add the instrument.
+- When the request has "corrections", your previous answer was refused or \
+could not be turned into trades, for exactly those reasons. Fix every one and \
+answer again with a complete allocation. Do not repeat a target that a \
+correction names as impossible.
 - "target_weight" is the share of the total portfolio value the instrument \
 should hold after the rebalance, between 0 and 1. Zero means a complete exit.
 - "target_cash_weight" is the share that should stay in cash, between 0 and 1.
@@ -162,4 +166,6 @@ def user_message(context: PortfolioAnalysisContext) -> str:
         },
         "warnings": list(context.warnings),
     }
+    if context.corrections:
+        payload["corrections"] = list(context.corrections)
     return json.dumps(payload, indent=2, default=str)

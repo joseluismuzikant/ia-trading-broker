@@ -2,11 +2,12 @@
 
 This module owns the rules that involve more than one layer:
 
-* one token per connection, cached in memory;
-* exactly one retry after an authentication error;
+* which adapter reads a given connection (``open_reader``);
 * a snapshot on every success, and a stale flag on every failure;
 * a country portfolio stored in the shared, broker-agnostic format.
 
+Logging in, the token cache and the one renewal after a rejected token belong
+to the broker's own adapter (for IOL, :class:`~app.infrastructure.iol.IOLBroker`).
 No function here logs or returns a password or a bearer token.
 """
 
@@ -14,27 +15,26 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Awaitable, Callable
-from dataclasses import dataclass
-from datetime import UTC, datetime, timedelta
-from typing import TypeVar
+from dataclasses import asdict, dataclass
 
 from pydantic import ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import get_settings
+from app.domain import brokers as broker_kinds
 from app.domain.money import money
+from app.domain.universe import get_universe
 from app.infrastructure.iol import (
     AccountStatus,
-    IOLAPIError,
-    IOLAuthError,
-    IOLClient,
-    IOLUnavailableError,
+    IOLBroker,
     Quote,
     build_client,
-    portfolio_currency,
+    price_bar_from_quote,
     safe_message,
-    to_portfolio,
 )
-from app.infrastructure.iol.tokens import CachedToken, token_store
+from app.infrastructure.ppi.broker import PPIBroker
+from app.infrastructure.ppi.client import build_client as build_ppi_client
+from app.infrastructure.simulation import PaperBroker
 from app.models import (
     SNAPSHOT_ACCOUNT_STATUS,
     SNAPSHOT_PROFILE,
@@ -43,14 +43,109 @@ from app.models import (
     portfolio_snapshot_kind,
     price_history_kind,
 )
+from app.ports.broker_reader import (
+    BrokerError,
+    BrokerReader,
+    BrokerUnavailableError,
+    PriceBar,
+)
 from app.services import connections as connections_service
+from app.services import ledger as ledger_service
 from app.services import snapshots as snapshots_service
 
 logger = logging.getLogger("ia_trading_broker.broker")
 
-T = TypeVar("T")
-
 SUPPORTED_BROKER = "iol"
+
+
+async def _open_iol(connection: BrokerConnection, db: AsyncSession | None) -> IOLBroker:
+    """An IOL reader. The password is decrypted only when a login is needed."""
+    return IOLBroker(
+        connection_id=connection.id,
+        username=connection.username,
+        password_provider=lambda: connections_service.load_password(connection),
+        client=build_client(),
+    )
+
+
+async def _open_paper(connection: BrokerConnection, db: AsyncSession | None) -> PaperBroker:
+    """A paper account, priced through one of the owner's real connections."""
+    if db is None:
+        raise BrokerUnavailableError("a paper account can only be read with a database session")
+
+    price_source: BrokerReader | None = None
+    if connection.price_source_connection_id is not None:
+        try:
+            source = await connections_service.get_connection(
+                db,
+                user_id=connection.user_id,
+                connection_id=connection.price_source_connection_id,
+            )
+        except connections_service.ConnectionNotFoundError as exc:
+            raise BrokerUnavailableError(
+                "The connection this paper account takes prices from no longer exists."
+            ) from exc
+        if broker_kinds.is_simulated(source.broker):
+            raise BrokerUnavailableError("A paper account cannot take prices from another one.")
+        price_source = await open_reader(source, db=db)
+
+    async def load_account(country: str):
+        return await ledger_service.load_paper_account(
+            db, user_id=connection.user_id, connection=connection, country=country
+        )
+
+    return PaperBroker(
+        country=connection.country, load_account=load_account, price_source=price_source
+    )
+
+
+#: PPI instrument types known to be accepted, by the universe category they cover.
+#: Only shares are confirmed; everything else is refused rather than guessed.
+_PPI_INSTRUMENT_TYPES = {"argentina_stocks": "ACCIONES"}
+
+
+def _ppi_instrument_type(symbol: str) -> str | None:
+    """PPI's instrument type for a symbol, from its universe category, if confirmed."""
+    universe = get_universe(get_settings().universe_config_path or None)
+    instrument = universe.find(symbol)
+    return _PPI_INSTRUMENT_TYPES.get(instrument.category) if instrument else None
+
+
+async def _open_ppi(connection: BrokerConnection, db: AsyncSession | None) -> PPIBroker:
+    """A PPI reader. The keys are decrypted only when a login is needed."""
+
+    def keys() -> tuple[str, str]:
+        fields = connections_service.load_credentials(connection)
+        return fields["api_key"], fields["api_secret"]
+
+    return PPIBroker(
+        connection_id=connection.id,
+        account_number=connections_service.load_credentials(connection)["account_number"],
+        credentials_provider=keys,
+        client=build_ppi_client(),
+        instrument_type_for=_ppi_instrument_type,
+    )
+
+
+#: One entry per broker a connection can name. Adding a broker is adding an
+#: adapter and one line here; nothing else in the services changes.
+_READER_FACTORIES: dict[
+    str, Callable[[BrokerConnection, AsyncSession | None], Awaitable[BrokerReader]]
+] = {
+    broker_kinds.IOL: _open_iol,
+    broker_kinds.PPI: _open_ppi,
+    broker_kinds.PAPER: _open_paper,
+}
+
+
+async def open_reader(
+    connection: BrokerConnection, *, db: AsyncSession | None = None
+) -> BrokerReader:
+    """The adapter that reads this connection. The caller closes it."""
+    factory = _READER_FACTORIES.get(connection.broker)
+    if factory is None:
+        raise BrokerUnavailableError(f"broker {connection.broker!r} is not supported yet")
+    return await factory(connection, db)
 
 
 @dataclass(frozen=True)
@@ -75,62 +170,9 @@ class ConnectionTestResult:
     error: str | None = None
 
 
-async def _token_for(
-    client: IOLClient, connection: BrokerConnection, *, refresh_token: str | None = None
-) -> CachedToken:
-    """Return a usable token, logging in when the cache has nothing."""
-    if refresh_token:
-        try:
-            token = await client.refresh_token(refresh_token)
-        except IOLAPIError:
-            logger.info(
-                "refresh failed for connection id=%s; falling back to a login",
-                connection.id,
-            )
-        else:
-            await token_store.set(connection.id, token)
-            return token
-
-    password = connections_service.load_password(connection)
-    token = await client.fetch_token(
-        username=connection.username,
-        password=password,
-    )
-    await token_store.set(connection.id, token)
-    return token
-
-
-async def _call_with_one_retry(
-    client: IOLClient,
-    connection: BrokerConnection,
-    call: Callable[[str], object],
-) -> T:
-    """Run ``call`` with a valid token, renewing once after a rejection."""
-    cached = await token_store.get(connection.id)
-    if cached is None:
-        token = await _token_for(client, connection)
-    else:
-        token = cached
-
-    try:
-        return await call(token.access_token)  # type: ignore[misc]
-    except IOLAuthError:
-        # Exactly one retry: refresh the token, or log in again when the
-        # refresh token is missing or refused.
-        logger.info("token rejected for connection id=%s; renewing once", connection.id)
-        await token_store.discard(connection.id)
-        renewed = await _token_for(client, connection, refresh_token=token.refresh_token)
-        return await call(renewed.access_token)  # type: ignore[misc]
-
-
-def _ensure_supported(connection: BrokerConnection) -> None:
-    if connection.broker != SUPPORTED_BROKER:
-        raise IOLUnavailableError(f"broker {connection.broker!r} is not supported yet")
-
-
 async def trading_session(
     connection: BrokerConnection,
-) -> tuple[IOLClient, str, Callable[[], Awaitable[str]]]:
+) -> tuple[object, str, Callable[[], Awaitable[str]]]:
     """An authenticated client and a token renewer for the trading writes.
 
     Reads are retried carefully; writes are not. The renewer exists only so the
@@ -138,29 +180,32 @@ async def trading_session(
     (401/403, where the broker placed nothing). No caller may use it to resend
     an order whose outcome is unknown. The caller owns the client and must
     close it when the session is done.
+
+    Live orders are only wired for IOL; any other broker is refused here.
     """
-    _ensure_supported(connection)
-    client = build_client()
-    cached = await token_store.get(connection.id)
-    token = cached if cached is not None else await _token_for(client, connection)
-
-    async def renew() -> str:
-        await token_store.discard(connection.id)
-        renewed = await _token_for(client, connection)
-        return renewed.access_token
-
-    return client, token.access_token, renew
+    kind = broker_kinds.kind_of(connection.broker)
+    if kind is None or not kind.can_trade:
+        raise BrokerUnavailableError(
+            f"live execution is not available for {connection.broker!r} connections"
+        )
+    reader = await open_reader(connection)
+    if not isinstance(reader, IOLBroker):  # pragma: no cover - can_trade implies IOL today
+        await reader.aclose()
+        raise BrokerUnavailableError("live execution is only wired for IOL")
+    return reader.client, await reader.access_token(), reader.renew_access_token
 
 
 async def test_connection(
     db: AsyncSession, *, connection: BrokerConnection
 ) -> ConnectionTestResult:
-    """Authenticate against IOL without reading any account data."""
+    """Authenticate against the broker without reading any account data."""
     try:
-        _ensure_supported(connection)
-        async with build_client() as client:
-            await _call_with_one_retry(client, connection, lambda token: _noop(client, token))
-    except IOLAPIError as exc:
+        reader = await open_reader(connection, db=db)
+        try:
+            await reader.authenticate()
+        finally:
+            await reader.aclose()
+    except BrokerError as exc:
         safe = safe_message(exc.message)
         await connections_service.record_failure(db, connection, safe)
         logger.warning("connection test failed for connection id=%s: %s", connection.id, safe)
@@ -171,27 +216,22 @@ async def test_connection(
     return ConnectionTestResult(ok=True)
 
 
-async def _noop(_client: IOLClient, _token: str) -> None:
-    """Placeholder call that only proves a token was issued."""
-    return None
-
-
 async def _read(
     db: AsyncSession,
     *,
     user_id: int,
     connection: BrokerConnection,
     kind: str,
-    fetch: Callable[[IOLClient, str], object],
+    fetch: Callable[[BrokerReader], Awaitable[dict]],
 ) -> BrokerReadResult:
     """Shared read path: fetch, then snapshot or mark stale."""
     try:
-        _ensure_supported(connection)
-        async with build_client() as client:
-            payload = await _call_with_one_retry(
-                client, connection, lambda token: fetch(client, token)
-            )
-    except IOLAPIError as exc:
+        reader = await open_reader(connection, db=db)
+        try:
+            payload = await fetch(reader)
+        finally:
+            await reader.aclose()
+    except BrokerError as exc:
         safe = safe_message(exc.message)
         await connections_service.record_failure(db, connection, safe)
         snapshot = await snapshots_service.mark_latest_stale(
@@ -222,7 +262,7 @@ async def _read(
         user_id=user_id,
         connection_id=connection.id,
         kind=kind,
-        payload=payload,  # type: ignore[arg-type]
+        payload=payload,
     )
     logger.info(
         "%s snapshot saved for connection id=%s (snapshot id=%s)",
@@ -233,14 +273,21 @@ async def _read(
     return BrokerReadResult(kind=kind, ok=True, snapshot=snapshot)
 
 
+def _iol_only(reader: BrokerReader, method: str):
+    """An IOL-specific read, or an error when this broker has no such page."""
+    call = getattr(reader, method, None)
+    if call is None:
+        raise BrokerUnavailableError("this broker does not provide that information")
+    return call
+
+
 async def read_profile(
     db: AsyncSession, *, user_id: int, connection: BrokerConnection
 ) -> BrokerReadResult:
-    """Refresh and store the IOL profile snapshot."""
+    """Refresh and store the broker's profile snapshot (IOL only)."""
 
-    async def fetch(client: IOLClient, token: str) -> dict:
-        profile = await client.get_profile(token)
-        return profile.model_dump(mode="json", by_alias=True)
+    async def fetch(reader: BrokerReader) -> dict:
+        return await _iol_only(reader, "get_profile_payload")()
 
     return await _read(
         db, user_id=user_id, connection=connection, kind=SNAPSHOT_PROFILE, fetch=fetch
@@ -250,11 +297,10 @@ async def read_profile(
 async def read_account_status(
     db: AsyncSession, *, user_id: int, connection: BrokerConnection
 ) -> BrokerReadResult:
-    """Refresh and store the IOL account-status snapshot."""
+    """Refresh and store the broker's account-status snapshot (IOL only)."""
 
-    async def fetch(client: IOLClient, token: str) -> dict:
-        status = await client.get_account_status(token)
-        return status.model_dump(mode="json", by_alias=True)
+    async def fetch(reader: BrokerReader) -> dict:
+        return await _iol_only(reader, "get_account_status_payload")()
 
     return await _read(
         db,
@@ -335,18 +381,20 @@ async def read_portfolio(
     """Refresh one country portfolio and store it in the shared format."""
     clean_country = connections_service.validate_country(country)
 
-    async def fetch(client: IOLClient, token: str) -> dict:
-        raw = await client.get_portfolio(token, clean_country)
-        # A cheap indexed read. It may repeat if the token is renewed mid-call,
-        # which is harmless because it only reads.
-        cash = await _cash_from_account_status(
-            db,
-            user_id=user_id,
-            connection=connection,
-            currency=portfolio_currency(raw),
-        )
-        portfolio = to_portfolio(clean_country, raw, cash=cash)
-        return portfolio.model_dump(mode="json")
+    async def fetch(reader: BrokerReader) -> dict:
+        portfolio = await reader.get_portfolio(clean_country)
+        cash = portfolio.cash
+        if cash is None:
+            # IOL's holdings endpoint does not report cash, so it comes from the
+            # saved account status (a cheap indexed read) instead of a second
+            # broker call.
+            cash = await _cash_from_account_status(
+                db,
+                user_id=user_id,
+                connection=connection,
+                currency=portfolio.currency,
+            )
+        return portfolio.model_copy(update={"cash": cash}).model_dump(mode="json")
 
     return await _read(
         db,
@@ -377,27 +425,17 @@ async def read_price_history(
     overwrites another's. The payload holds the list of quotes and nothing else.
     """
     clean_symbol = symbol.strip().upper()
-    # IOL market codes are uppercase; the portfolio payload reports them
-    # lowercased, so the code is normalised here as well as in the client.
+    # Market codes are uppercase; the portfolio payload reports them lowercased.
     clean_market = market.strip().upper()
     if not clean_symbol or not clean_market:
-        raise IOLUnavailableError("a market and a symbol are required")
+        raise BrokerUnavailableError("a market and a symbol are required")
 
-    date_to = datetime.now(UTC).date()
-    date_from = date_to - timedelta(days=days)
-
-    async def fetch(client: IOLClient, token: str) -> dict:
-        quotes = await client.get_price_history(
-            token,
-            market=clean_market,
-            symbol=clean_symbol,
-            date_from=date_from.isoformat(),
-            date_to=date_to.isoformat(),
-        )
+    async def fetch(reader: BrokerReader) -> dict:
+        bars = await reader.get_history(symbol=clean_symbol, market=clean_market, days=days)
         return {
             "symbol": clean_symbol,
             "market": clean_market,
-            "quotes": [quote.model_dump(mode="json", by_alias=True) for quote in quotes],
+            "quotes": [asdict(bar) for bar in bars],
         }
 
     return await _read(
@@ -409,10 +447,23 @@ async def read_price_history(
     )
 
 
-def quotes_from_snapshot(snapshot: Snapshot) -> list[Quote]:
-    """Read the quotes out of a saved price-history snapshot."""
-    payload = snapshot.payload.get("quotes", [])
-    return [Quote.model_validate(item) for item in payload]
+def bars_from_snapshot(snapshot: Snapshot) -> list[PriceBar]:
+    """Read the price bars out of a saved price-history snapshot.
+
+    Snapshots saved before the broker port stored IOL's own quote rows; they
+    are recognised by their field names and converted, so old data still loads.
+    """
+    bars: list[PriceBar] = []
+    for item in snapshot.payload.get("quotes", []):
+        if "ultimoPrecio" in item or "fechaHora" in item:
+            bars.append(price_bar_from_quote(Quote.model_validate(item)))
+        else:
+            bars.append(PriceBar(**item))
+    return bars
+
+
+#: The name callers used before the port; it now returns neutral bars.
+quotes_from_snapshot = bars_from_snapshot
 
 
 async def load_snapshot(

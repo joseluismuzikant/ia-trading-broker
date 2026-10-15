@@ -1,8 +1,10 @@
-"""Broker connection rules: saving, testing, and deleting IOL logins."""
+"""Broker connection rules: saving, testing, and deleting broker logins."""
 
 from __future__ import annotations
 
+import json
 import logging
+from collections.abc import Mapping
 from datetime import UTC, datetime
 
 from sqlalchemy import select
@@ -10,6 +12,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.crypto import CredentialEncryptionError, decrypt_secret, encrypt_secret
+from app.domain import brokers as broker_kinds
 from app.models import BrokerConnection
 
 logger = logging.getLogger("ia_trading_broker.connections")
@@ -153,6 +156,122 @@ async def create_connection(
         connection.broker,
     )
     return connection
+
+
+async def create_broker_connection(
+    db: AsyncSession,
+    *,
+    user_id: int,
+    broker: str,
+    label: str,
+    fields: Mapping[str, str],
+    options: Mapping[str, str] | None = None,
+    country: str = "argentina",
+    price_source_connection_id: int | None = None,
+) -> BrokerConnection:
+    """Save a connection for any broker the application knows.
+
+    What is asked for comes from ``app.domain.brokers``: every field of the
+    broker is required and is stored, with the options, as one encrypted JSON
+    object. A paper account has no login fields and may name one of the user's
+    own connections as its price source. The IOL form keeps using
+    :func:`create_connection`, which stores the password in its own column.
+    """
+    kind = broker_kinds.kind_of(broker)
+    if kind is None:
+        raise ConnectionValidationError(f"unknown broker {broker!r}")
+    if broker == broker_kinds.IOL:
+        raise ConnectionValidationError("use the IOL connection form for an IOL login")
+
+    clean_label = normalize_label(label)
+    clean_country = validate_country(country)
+    if not clean_label:
+        raise ConnectionValidationError("label is required")
+    if len(clean_label) > MAX_LABEL_LENGTH:
+        raise ConnectionValidationError("label is too long")
+
+    clean_fields: dict[str, str] = {}
+    for spec in kind.fields:
+        value = str(fields.get(spec.name, "")).strip()
+        if not value:
+            raise ConnectionValidationError(f"{spec.label} is required")
+        if len(value) > spec.max_length:
+            raise ConnectionValidationError(f"{spec.label} is too long")
+        clean_fields[spec.name] = value
+
+    clean_options = {str(k): str(v).strip() for k, v in (options or {}).items() if str(v).strip()}
+
+    if price_source_connection_id is not None:
+        if not kind.simulated:
+            raise ConnectionValidationError("only a paper account can use a price source")
+        source = await get_connection(db, user_id=user_id, connection_id=price_source_connection_id)
+        if broker_kinds.is_simulated(source.broker):
+            raise ConnectionValidationError("a paper account cannot take prices from another one")
+
+    if await label_is_taken(db, user_id=user_id, label=clean_label):
+        raise ConnectionAlreadyExistsError("A connection with that label already exists.")
+
+    sealed: str | None = None
+    if clean_fields or clean_options:
+        try:
+            sealed = encrypt_secret(json.dumps({"fields": clean_fields, "options": clean_options}))
+        except CredentialEncryptionError as exc:
+            raise ConnectionValidationError(str(exc)) from exc
+
+    shown = clean_fields.get(kind.display_field, "") if kind.display_field else ""
+    connection = BrokerConnection(
+        user_id=user_id,
+        broker=broker,
+        label=clean_label,
+        country=clean_country,
+        username=shown[:MAX_USERNAME_LENGTH] or broker,
+        password_encrypted="",
+        credentials_encrypted=sealed,
+        price_source_connection_id=price_source_connection_id,
+    )
+    db.add(connection)
+    try:
+        await db.commit()
+    except IntegrityError as exc:
+        await db.rollback()
+        raise ConnectionAlreadyExistsError("A connection with that label already exists.") from exc
+
+    await db.refresh(connection)
+    logger.info(
+        "saved broker connection id=%s user_id=%s broker=%s",
+        connection.id,
+        user_id,
+        connection.broker,
+    )
+    return connection
+
+
+def _load_sealed(connection: BrokerConnection) -> dict:
+    """The decrypted JSON a non-IOL connection stores, or an empty one."""
+    if not connection.credentials_encrypted:
+        return {}
+    try:
+        data = json.loads(decrypt_secret(connection.credentials_encrypted))
+    except ValueError as exc:
+        raise CredentialEncryptionError("stored credentials could not be read") from exc
+    return data if isinstance(data, dict) else {}
+
+
+def load_credentials(connection: BrokerConnection) -> dict[str, str]:
+    """Every login field of a connection, decrypted for one broker call.
+
+    An IOL connection keeps its login in the original two columns, so it is
+    read from there; every other broker is read from the encrypted JSON. The
+    result must never be logged, stored, or rendered.
+    """
+    if connection.broker == broker_kinds.IOL:
+        return {"username": connection.username, "password": load_password(connection)}
+    return {str(k): str(v) for k, v in _load_sealed(connection).get("fields", {}).items()}
+
+
+def load_options(connection: BrokerConnection) -> dict[str, str]:
+    """The non-login settings of a connection (a paper account's starting cash)."""
+    return {str(k): str(v) for k, v in _load_sealed(connection).get("options", {}).items()}
 
 
 def load_password(connection: BrokerConnection) -> str:

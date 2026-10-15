@@ -382,6 +382,19 @@ def plan_rebalance(
     )
 
 
+def correction_notes(plan: RebalancePlan) -> list[str]:
+    """Why each trade the model asked for cannot be filled, as feedback to it.
+
+    A plan with no such rows needs no correction. Each note names the symbol,
+    the weight the model asked for, and the planner's own reason, so the model
+    can change that target instead of guessing.
+    """
+    return [
+        f"{row.symbol}: a target of {row.target_weight:.1%} cannot be traded: {row.reason}"
+        for row in plan.not_executable
+    ]
+
+
 def _within_one_unit(item: dict) -> None:
     """Record that a held position is within one unit of its target: a hold."""
     item["within_one_unit"] = True

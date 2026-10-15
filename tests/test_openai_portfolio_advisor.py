@@ -513,3 +513,25 @@ def test_a_bond_unit_cost_divides_the_quote_by_its_factor() -> None:
 def test_the_system_prompt_states_the_whole_unit_rule() -> None:
     assert "whole units" in SYSTEM_PROMPT
     assert "one_unit_weight" in SYSTEM_PROMPT
+
+
+def test_corrections_reach_the_model_only_when_there_are_some() -> None:
+    import json
+    from dataclasses import replace
+
+    from app.infrastructure.openai.prompts import user_message
+
+    first = json.loads(user_message(build_context()))
+    retry = json.loads(
+        user_message(
+            replace(build_context(), corrections=("VIST: a target of 0.6% cannot be traded",))
+        )
+    )
+
+    assert "corrections" not in first
+    assert retry["corrections"] == ["VIST: a target of 0.6% cannot be traded"]
+
+
+def test_the_system_prompt_explains_corrections() -> None:
+    assert '"corrections"' in SYSTEM_PROMPT
+    assert "answer again" in SYSTEM_PROMPT

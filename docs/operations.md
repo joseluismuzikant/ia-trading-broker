@@ -26,6 +26,7 @@ Copy `.env.example` to `.env`. Keys stay in the environment, never in TOML or Gi
 | `POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_DB` | Compose database settings |
 | `DATABASE_URL` | Database URL for local Python |
 | `OPENAI_API_KEY`, `GEMINI_API_KEY`, `MIMO_API_KEY`, `DEEPSEEK_API_KEY`, `XAI_API_KEY`, `ANTHROPIC_API_KEY` | Optional; a run needs the key named by its catalog entry. The fake simulator needs none |
+| `ANALYSIS_MAX_ATTEMPTS` | Answers one run may ask of the model: 1 to 3, default 2. A refused or unfillable answer is sent back with the reasons until this is used up. 1 turns the retry off. Add `ANALYSIS_MAX_ATTEMPTS=2` to `.env` to change it |
 | `OPENAI_TIMEOUT_SECONDS` | Default wait for one model call (30 s); a catalog entry's `timeout_seconds` overrides it |
 | `ANALYSIS_MODEL_DEFAULT` | Default catalog key; blank uses `[defaults].model` |
 | `IOL_LIVE_PLAZO` | Settlement term for live orders (e.g. `t2`). Live execution fails closed while empty, which is how it stays off |
@@ -85,6 +86,17 @@ docker compose restart app    # plain restart (no rebuild, keeps old env/code)
 - **Tables** are created automatically at startup when they are missing. This
   is not a migration system: a column added to an *existing* table needs a
   manual `ALTER TABLE` (or a fresh database).
+- **Upgrading a database that already exists.** Per-broker credentials and paper
+  accounts added two columns to `broker_connections`. Run once, before starting
+  the new version:
+
+```bash
+docker compose exec db psql -U trading -d trading -c \
+  "ALTER TABLE broker_connections ADD COLUMN IF NOT EXISTS credentials_encrypted TEXT;
+   ALTER TABLE broker_connections ADD COLUMN IF NOT EXISTS price_source_connection_id INTEGER;"
+```
+
+  Existing IOL connections keep working unchanged. A fresh database needs nothing.
 - **Reset the analysis data** — every proposal, approval, order, and trading
   event — while keeping users, connections, snapshots, and the paper ledger
   (Compose default credentials):
@@ -121,7 +133,7 @@ python -m pytest -q        # on the host; needs requirements-dev installed
 ruff check . && ruff format --check .
 ```
 
-Expected: every test passes (635 at the time of writing). The suite uses an
+Expected: every test passes (680 at the time of writing). The suite uses an
 isolated database and a fake IOL transport, so it can never send a real order.
 GitHub Actions (`.github/workflows/ci.yml`) runs the same three commands on
 every push to `main` and every pull request. The Docker image ships the
@@ -184,7 +196,7 @@ state and operation number, and pressing Execute again never resends one.
 
 ### What is verified where
 
-- **Automated tests (635, offline):** the full flow against a fake IOL
+- **Automated tests (680, offline):** the full flow against a fake IOL
   transport: stock and bond sells/buys, phase routes and per-trade execution, form
   fields and endpoints, accepted / rejected / partial / timeout handling, no
   duplicate submissions, cash and holdings guards, restart safety, and the PPI
