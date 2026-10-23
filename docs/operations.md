@@ -15,7 +15,7 @@ version see the [README](../README.md).
   optional `timeout_seconds` for slow reasoning models. An entry with `kind =
   "fake"` builds the offline simulator instead: no endpoint, no key. The
   shipped catalog lists GPT-6.1 Sol, Gemini 3.8 Flash, MiMo V2.6 Pro, DeepSeek
-  R1, Grok 4, Claude Opus 5.5, and the Fake simulator (smoke test).
+  R1, DeepSeek V4.1 Flash, Grok 4, Claude Opus 5.5, and the Fake simulator (smoke test).
 
 Copy `.env.example` to `.env`. Keys stay in the environment, never in TOML or Git.
 

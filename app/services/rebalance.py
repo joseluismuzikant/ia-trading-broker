@@ -17,7 +17,11 @@ never binary floats, never a second look at the model. The rules are:
   ``quoted_price * quantity / quotation_factor``. The price sent to IOL stays
   the quoted price;
 * quantities are whole units rounded **down**, and the rounding difference
-  simply stays in cash rather than inventing money;
+  simply stays in cash rather than inventing money. The one exception: a
+  target within ``UNIT_ROUNDING_TOLERANCE`` (1%) of the next whole unit counts
+  as that unit, so a target that is short of one share by a few cents is not
+  refused. Every later check still applies: the cash floor, the position cap,
+  the funds actually available, and the minimum quantity;
 * SELLS are planned and applied before BUYS, so sale proceeds fund the buys;
 * never sell more than is held, never buy with money the ledger does not have,
   and keep the configured cash floor untouched;
@@ -138,9 +142,28 @@ class RebalancePlan:
         return [row for row in self.rows if not row.executable]
 
 
+#: How close to the next whole unit a target must be to count as that unit. It
+#: is a share of one unit's cost, so a 1,000-peso unit is bought when the target
+#: is within 10 pesos of it. It is small on purpose: the model's weight is
+#: honoured, and only a rounding-sized shortfall is forgiven.
+UNIT_ROUNDING_TOLERANCE = Decimal("0.01")
+
+
 def _units(value: Decimal) -> Decimal:
     """Whole units that fit in ``value``, rounded down."""
     return quantity(value.to_integral_value(rounding=ROUND_DOWN))
+
+
+def _units_wanted(value: Decimal) -> Decimal:
+    """Whole units a target asks for: rounded down, unless a hair short of the next.
+
+    ``0.9999`` of a unit is one unit, because the shortfall is smaller than the
+    price can resolve. ``0.95`` is still none.
+    """
+    whole = value.to_integral_value(rounding=ROUND_DOWN)
+    if value - whole >= UNIT - UNIT_ROUNDING_TOLERANCE:
+        whole += UNIT
+    return quantity(whole)
 
 
 def _usable_price(symbol: str, ledger: PaperLedger, prices: Mapping[str, Money]) -> Money | None:
@@ -230,7 +253,7 @@ def plan_rebalance(
         delta = item["delta"]
         if delta >= 0:
             continue
-        item["required_quantity"] = _units((-delta) / item["unit_cost"].amount)
+        item["required_quantity"] = _units_wanted((-delta) / item["unit_cost"].amount)
         if item["decision"].action == "HOLD":
             continue  # a hold needs no transaction
         if item["required_quantity"] < UNIT:
@@ -280,7 +303,7 @@ def plan_rebalance(
         if delta <= 0:
             continue
         unit_cost = item["unit_cost"]
-        item["required_quantity"] = _units(delta / unit_cost.amount)
+        item["required_quantity"] = _units_wanted(delta / unit_cost.amount)
         if item["decision"].action == "HOLD":
             continue  # a hold needs no transaction
         if item["required_quantity"] < UNIT and item["held_units"] > 0:
@@ -306,7 +329,7 @@ def plan_rebalance(
                 "leaves less room than that",
             )
             continue
-        wanted_units = _units(delta / unit_cost.amount)
+        wanted_units = _units_wanted(delta / unit_cost.amount)
         units = min(wanted_units, _units(cap_room / unit_cost.amount))
         if units < wanted_units:
             warnings.append(

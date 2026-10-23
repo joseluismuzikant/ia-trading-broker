@@ -605,7 +605,17 @@ async def execute_single_order(
         db, user_id=user_id, connection=connection, country=proposal.country
     )
     cash_limit = None
-    if side == "BUY":
+    if side == "BUY" and live:
+        # The cash a purchase may spend is what the broker reports now, not what
+        # an earlier read saw: trades since then may have used it.
+        refreshed = await broker_service.read_account_status(
+            db, user_id=user_id, connection=connection
+        )
+        if not refreshed.ok:
+            raise ExecutionError(
+                "The cash the broker reports could not be confirmed right now, so "
+                "no purchase was sent."
+            )
         cash_limit = await broker_service.available_cash(
             db, user_id=user_id, connection=connection, currency=proposal.currency
         )

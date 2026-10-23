@@ -866,3 +866,74 @@ async def test_two_requests_racing_for_the_same_order_send_it_once(
 
     assert created is False
     assert saved.status == "accepted"
+
+
+# --- Regression: a live purchase confirms the cash right now ---------------------
+
+
+async def test_a_live_purchase_uses_the_cash_the_broker_reports_now_not_an_older_read(
+    db_session, make_user, fake_iol, monkeypatch
+) -> None:
+    from app.domain.trading import Proposal
+    from app.services import snapshots as snapshots_service
+
+    _enable_live(monkeypatch)
+    user = await make_user("alice")
+    connection = await make_connection(db_session, user, fake_iol)
+    record = await _live_proposal(db_session, user, connection)
+    await _record_sale(db_session, user, connection, record)
+    planned = next(
+        item for item in Proposal.model_validate(record.payload).orders if item.symbol == "VIST"
+    )
+    # An older read saw plenty of cash...
+    rich = {**fake_iol.account_status}
+    rich["cuentas"] = [dict(a, disponible=1_000_000.0) for a in rich["cuentas"]]
+    await snapshots_service.save_snapshot(
+        db_session,
+        user_id=user.id,
+        connection_id=connection.id,
+        kind="account_status",
+        payload=rich,
+    )
+    # ...but the broker now reports almost none, because trades used it.
+    fake_iol.account_status = {
+        **fake_iol.account_status,
+        "cuentas": [dict(a, disponible=1.0) for a in fake_iol.account_status["cuentas"]],
+    }
+
+    with pytest.raises(execution_service.ExecutionError):
+        await execution_service.execute_single_order(
+            db_session,
+            user_id=user.id,
+            connection=connection,
+            proposal_record=record,
+            symbol="VIST",
+            side="BUY",
+            units=planned.quantity,
+        )
+
+    assert fake_iol.trade_posts == []
+
+
+async def test_a_live_purchase_is_refused_when_the_cash_cannot_be_confirmed(
+    db_session, make_user, fake_iol, monkeypatch
+) -> None:
+    _enable_live(monkeypatch)
+    user = await make_user("alice")
+    connection = await make_connection(db_session, user, fake_iol)
+    record = await _live_proposal(db_session, user, connection)
+    await _record_sale(db_session, user, connection, record)
+    fake_iol.account_status_error_status = 500
+
+    with pytest.raises(execution_service.ExecutionError, match="could not be confirmed"):
+        await execution_service.execute_single_order(
+            db_session,
+            user_id=user.id,
+            connection=connection,
+            proposal_record=record,
+            symbol="VIST",
+            side="BUY",
+            units=Decimal("1"),
+        )
+
+    assert fake_iol.trade_posts == []

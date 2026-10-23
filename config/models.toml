@@ -69,6 +69,18 @@ api_key_env = "DEEPSEEK_API_KEY"
 # travels in the instructions instead.
 response_format = "json_object"
 
+# DeepSeek-V4.1-Flash. DeepSeek's docs name it `deepseek-flash` and say it thinks
+# by default, so no extra request field is sent. Same JSON-mode rule as above.
+[models.deepseek_v4_1_flash]
+label = "DeepSeek V4.1 Flash"
+model = "deepseek-flash"
+provider = "deepseek"
+api = "chat"
+base_url = "https://api.deepseek.com"
+api_key_env = "DEEPSEEK_API_KEY"
+response_format = "json_object"
+timeout_seconds = 180
+
 [models.grok_4]
 label = "Grok 4"
 model = "grok-4"

@@ -50,6 +50,13 @@ so a service reads a portfolio or a price history without knowing whose it is.
 IOL keeps its login in `username` and `password_encrypted`; every other broker
 keeps all its fields in one encrypted JSON value, `credentials_encrypted`.
 
+**Cash is read with the portfolio.** IOL's holdings endpoint does not report
+cash, so a portfolio read also reads the cash balances in the same session (one
+extra call) and adds only the balances in the portfolio's own currency. It is
+never taken from an older saved account status: holdings and cash from different
+moments add up to a portfolio that never existed. A live purchase likewise
+confirms the cash with the broker right before it is sent.
+
 **Paper accounts.** A paper account has its own saved state (the snapshot kind
 `paper_account:{country}`), started from a cash amount or a copy of a real
 account's holdings, and priced through one of the user's real connections. It
@@ -155,7 +162,9 @@ quantities:
 - `target value = portfolio value × target weight`; the delta against the
   current value decides BUY, SELL, or HOLD;
 - quantities are whole units rounded down; the rounding difference stays in
-  cash;
+  cash. A target within 1% of the next whole unit counts as that unit, so a
+  target a few cents short of one share is not refused (the cash floor, the
+  position cap and the funds available still apply);
 - **sells are planned and applied before buys**, so sale proceeds fund the
   buys, and execution uses the same order;
 - never sell more than is held, never buy with money the ledger does not have,

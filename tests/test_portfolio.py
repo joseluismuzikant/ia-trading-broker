@@ -269,7 +269,7 @@ async def test_a_portfolio_read_saves_the_shared_format(db_session, make_user, f
     assert payload["positions"][0]["instrument"]["symbol"] == "GGAL"
 
 
-async def test_a_single_refresh_costs_one_broker_call(db_session, make_user, fake_iol) -> None:
+async def test_a_single_refresh_is_one_login_and_two_reads(db_session, make_user, fake_iol) -> None:
     user = await make_user("alice")
     connection = await make_connection(db_session, user, fake_iol)
 
@@ -277,9 +277,10 @@ async def test_a_single_refresh_costs_one_broker_call(db_session, make_user, fak
         db_session, user_id=user.id, connection=connection, country="argentina"
     )
 
-    # A login plus exactly one read: pages never poll, so refreshing is cheap.
+    # One login and two reads, the holdings and the cash, in the same session:
+    # pages never poll, and the cash is never older than the holdings.
     assert fake_iol.token_grants == ["password"]
-    assert fake_iol.authenticated_paths == ["/api/v2/portafolio/argentina"]
+    assert fake_iol.authenticated_paths == ["/api/v2/portafolio/argentina", "/api/v2/estadocuenta"]
 
 
 async def test_cash_comes_from_the_saved_account_status(db_session, make_user, fake_iol) -> None:
@@ -295,15 +296,67 @@ async def test_cash_comes_from_the_saved_account_status(db_session, make_user, f
     assert result.snapshot.payload["cash"] == 100.0
 
 
-async def test_cash_is_unknown_without_an_account_status(db_session, make_user, fake_iol) -> None:
+async def test_cash_is_read_from_the_broker_now_not_from_an_older_saved_status(
+    db_session, make_user, fake_iol
+) -> None:
+    """Regression: the portfolio once took its cash from an account status saved hours
+    earlier, so a trade made since then left the cash (and the total) too high."""
     user = await make_user("alice")
     connection = await make_connection(db_session, user, fake_iol)
+    old = {**fake_iol.account_status}
+    old["cuentas"] = [dict(account, disponible=39742.18) for account in old["cuentas"]]
+    await snapshots_service.save_snapshot(
+        db_session,
+        user_id=user.id,
+        connection_id=connection.id,
+        kind="account_status",
+        payload=old,
+    )
+    # Since then the broker's real available cash dropped.
+    fake_iol.account_status = {
+        **fake_iol.account_status,
+        "cuentas": [dict(a, disponible=27452.24) for a in fake_iol.account_status["cuentas"]],
+    }
+
+    result = await broker_service.read_portfolio(
+        db_session, user_id=user.id, connection=connection, country="argentina"
+    )
+
+    assert result.snapshot.payload["cash"] == 27452.24
+
+
+async def test_cash_is_unknown_when_the_broker_reports_none_in_that_currency(
+    db_session, make_user, fake_iol
+) -> None:
+    user = await make_user("alice")
+    connection = await make_connection(db_session, user, fake_iol)
+    fake_iol.account_status = {**fake_iol.account_status, "cuentas": []}
 
     result = await broker_service.read_portfolio(
         db_session, user_id=user.id, connection=connection, country="argentina"
     )
 
     assert result.snapshot.payload["cash"] is None
+
+
+async def test_peso_cash_is_never_counted_into_another_currency(
+    db_session, make_user, fake_iol
+) -> None:
+    user = await make_user("alice")
+    connection = await make_connection(db_session, user, fake_iol)
+    fake_iol.account_status = {
+        **fake_iol.account_status,
+        "cuentas": [
+            {"numero": "1", "moneda": "peso_Argentino", "disponible": 1000.0},
+            {"numero": "2", "moneda": "dolar_Estadounidense", "disponible": 50.0},
+        ],
+    }
+
+    result = await broker_service.read_portfolio(
+        db_session, user_id=user.id, connection=connection, country="argentina"
+    )
+
+    assert result.snapshot.payload["cash"] == 1000.0  # the dollars are not added in
 
 
 async def test_each_country_has_its_own_snapshot(db_session, make_user, fake_iol) -> None:
@@ -323,7 +376,9 @@ async def test_each_country_has_its_own_snapshot(db_session, make_user, fake_iol
     assert stored == 2
     assert fake_iol.authenticated_paths == [
         "/api/v2/portafolio/argentina",
+        "/api/v2/estadocuenta",
         "/api/v2/portafolio/estados_unidos",
+        "/api/v2/estadocuenta",
     ]
 
 

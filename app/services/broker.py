@@ -22,7 +22,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
 from app.domain import brokers as broker_kinds
-from app.domain.money import money
+from app.domain.money import money, normalise_currency
 from app.domain.universe import get_universe
 from app.infrastructure.iol import (
     AccountStatus,
@@ -47,6 +47,7 @@ from app.ports.broker_reader import (
     BrokerError,
     BrokerReader,
     BrokerUnavailableError,
+    CashBalance,
     PriceBar,
 )
 from app.services import connections as connections_service
@@ -385,15 +386,11 @@ async def read_portfolio(
         portfolio = await reader.get_portfolio(clean_country)
         cash = portfolio.cash
         if cash is None:
-            # IOL's holdings endpoint does not report cash, so it comes from the
-            # saved account status (a cheap indexed read) instead of a second
-            # broker call.
-            cash = await _cash_from_account_status(
-                db,
-                user_id=user_id,
-                connection=connection,
-                currency=portfolio.currency,
-            )
+            # IOL's holdings endpoint does not report cash, so it is read from the
+            # broker now, in the same session. It is never borrowed from an older
+            # saved account status: holdings read at one moment and cash from
+            # hours earlier add up to a portfolio that never existed.
+            cash = _cash_for(portfolio.currency, clean_country, await reader.get_balances())
         return portfolio.model_copy(update={"cash": cash}).model_dump(mode="json")
 
     return await _read(
@@ -403,6 +400,23 @@ async def read_portfolio(
         kind=portfolio_snapshot_kind(clean_country),
         fetch=fetch,
     )
+
+
+#: The currency a country's portfolio is quoted in, when the holdings do not say.
+_COUNTRY_CURRENCY = {"argentina": "ARS", "estados_unidos": "USD"}
+
+
+def _cash_for(currency: str | None, country: str, balances: list[CashBalance]) -> float | None:
+    """Free cash in the portfolio's currency, or None when the broker reports none.
+
+    Only balances in that one currency are added: peso cash is never counted
+    into a dollar portfolio or the other way round.
+    """
+    wanted = normalise_currency(currency) or _COUNTRY_CURRENCY.get(country)
+    matching = [item for item in balances if wanted is None or item.currency == wanted]
+    if not matching:
+        return None
+    return float(sum(item.available for item in matching))
 
 
 #: Days of price history an analysis reads. Long enough for the slow EMA (26)

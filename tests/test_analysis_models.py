@@ -24,6 +24,7 @@ EXPECTED = {
     "gemini_3_8_flash": ("Gemini 3.8 Flash", "google", "GEMINI_API_KEY"),
     "mimo_v2_6_pro": ("MiMo V2.6 Pro", "xiaomi", "MIMO_API_KEY"),
     "deepseek_r1": ("DeepSeek R1", "deepseek", "DEEPSEEK_API_KEY"),
+    "deepseek_v4_1_flash": ("DeepSeek V4.1 Flash", "deepseek", "DEEPSEEK_API_KEY"),
     "grok_4": ("Grok 4", "xai", "XAI_API_KEY"),
     "claude_opus_5_5": ("Claude Opus 5.5", "anthropic", "ANTHROPIC_API_KEY"),
     "fake_simulator": ("Fake simulator (smoke test)", "simulator", ""),
@@ -229,6 +230,9 @@ def test_the_response_format_defaults_to_a_strict_schema_and_deepseek_uses_json_
 
     assert config.find("gpt_6_1_sol").response_format == "json_schema"
     assert config.find("deepseek_r1").response_format == "json_object"
+    flash = config.find("deepseek_v4_1_flash")
+    assert flash.response_format == "json_object" and flash.model == "deepseek-flash"
+    assert flash.timeout_seconds == 180.0
 
 
 def test_an_unknown_response_format_is_rejected(tmp_path: Path) -> None:

@@ -495,3 +495,76 @@ def test_a_plan_that_can_be_filled_needs_no_correction() -> None:
     advice = advice_from_targets({"GGAL": 0.0, "VIST": 0.40}, cash=0.60, current={"GGAL": 0.375})
 
     assert correction_notes(plan(advice=advice, account=account)) == []
+
+
+# --- A target a hair short of one unit --------------------------------------------
+
+
+def test_a_target_a_few_cents_short_of_one_unit_buys_that_unit() -> None:
+    # 12000 in cash. 9.99% is 1198.80, which is 1.20 short of one YPFD at 1200.
+    account = ledger("12000.00")
+    advice = advice_from_targets({"YPFD": 0.0999}, cash=0.9001, current={})
+
+    result = plan(advice=advice, account=account)
+
+    assert [(row.symbol, row.side, row.quantity) for row in result.trades] == [
+        ("YPFD", "BUY", Decimal("1"))
+    ]
+    assert result.not_executable == []
+
+
+def test_a_target_clearly_short_of_a_unit_is_still_refused() -> None:
+    # 9.5% is 1140: 5% short of one unit, beyond the tolerance.
+    account = ledger("12000.00")
+    advice = advice_from_targets({"YPFD": 0.095}, cash=0.905, current={})
+
+    result = plan(advice=advice, account=account)
+
+    assert result.trades == []
+    assert [row.symbol for row in result.not_executable] == ["YPFD"]
+    assert "does not fit" in result.not_executable[0].reason
+
+
+def test_the_tolerance_is_exactly_one_percent_of_a_unit() -> None:
+    from app.services.rebalance import UNIT_ROUNDING_TOLERANCE, _units_wanted
+
+    assert UNIT_ROUNDING_TOLERANCE == Decimal("0.01")
+    assert _units_wanted(Decimal("0.99")) == Decimal("1")
+    assert _units_wanted(Decimal("0.9899")) == Decimal("0")
+    assert _units_wanted(Decimal("2.995")) == Decimal("3")
+    assert _units_wanted(Decimal("2.5")) == Decimal("2")  # never rounds to nearest
+
+
+def test_a_trim_a_hair_short_of_one_unit_sells_that_unit_and_no_more_than_is_held() -> None:
+    # 2 YPFD at 1200 plus 9600 cash. 10.01% is 1201.20, so 1198.80 comes off.
+    account = ledger("9600.00", [("YPFD", "2", "1200.00")])
+    advice = advice_from_targets({"YPFD": 0.1001}, cash=0.8999, current={"YPFD": 0.2})
+
+    result = plan(advice=advice, account=account)
+
+    assert [(row.symbol, row.side, row.quantity) for row in result.trades] == [
+        ("YPFD", "SELL", Decimal("1"))
+    ]
+
+
+def test_a_trim_two_percent_short_of_one_unit_is_still_a_hold() -> None:
+    # 1176 off a 1200 unit is 98% of one: outside the tolerance.
+    account = ledger("9600.00", [("YPFD", "2", "1200.00")])
+    advice = advice_from_targets({"YPFD": 0.102}, cash=0.898, current={"YPFD": 0.2})
+
+    result = plan(advice=advice, account=account)
+
+    assert result.trades == []
+    assert result.rows[0].action == "HOLD"
+
+
+def test_the_extra_unit_never_breaks_the_cash_floor() -> None:
+    # 1250 in total and a 10% floor: after one 1200 unit only 50 would stay in
+    # cash, but the floor is 125. The unit that rounding allowed cannot be paid.
+    account = ledger("1250.00")
+    advice = advice_from_targets({"YPFD": 0.9599}, cash=0.0401, current={})
+
+    result = plan(advice=advice, account=account)
+
+    assert result.trades == []
+    assert [row.symbol for row in result.not_executable] == ["YPFD"]

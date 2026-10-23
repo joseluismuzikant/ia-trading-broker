@@ -108,9 +108,9 @@ async def test_the_page_shows_how_many_iol_calls_were_made(
     )
 
     assert "IOL API calls this month" in refreshed.text
-    # A login plus one read: refreshing a page is intentionally cheap.
+    # A login plus two reads (holdings and cash): refreshing a page stays cheap.
     assert fake_iol.token_grants == ["password"]
-    assert fake_iol.authenticated_paths == ["/api/v2/portafolio/argentina"]
+    assert fake_iol.authenticated_paths == ["/api/v2/portafolio/argentina", "/api/v2/estadocuenta"]
 
 
 async def test_cash_and_total_use_the_saved_account_status(

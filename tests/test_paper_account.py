@@ -267,6 +267,52 @@ async def test_a_paper_run_never_reaches_a_broker_and_only_executed_trades_chang
     assert fake_iol.trade_posts == []  # no order reached any broker
 
 
+async def test_a_paper_purchase_needs_no_broker_cash_and_reaches_no_broker(
+    db_session, make_user, fake_iol, fake_advisor
+) -> None:
+    user = await make_user("alice")
+    source = await _source_with_portfolio(db_session, user, fake_iol)
+    paper = await _paper(db_session, user, source, starting="copy")
+    fake_advisor.payload = advice_from_targets(
+        {"GGAL": 0.0, "YPFD": 0.65, "VIST": 0.25},
+        cash=0.10,
+        current={"GGAL": 0.3336, "YPFD": 0.6609},
+    )
+    state = await trading_flow.start_run(
+        db_session, user_id=user.id, connection=paper, country="argentina"
+    )
+    record = await analysis_service.get_proposal(
+        db_session, user_id=user.id, proposal_id=state["proposal_id"]
+    )
+    await execution_service.execute_single_order(
+        db_session,
+        user_id=user.id,
+        connection=paper,
+        proposal_record=record,
+        symbol="GGAL",
+        side="SELL",
+        units=Decimal("100"),
+    )
+    asked_before = list(fake_iol.authenticated_paths).count("/api/v2/estadocuenta")
+
+    await execution_service.execute_single_order(
+        db_session,
+        user_id=user.id,
+        connection=paper,
+        proposal_record=record,
+        symbol="VIST",
+        side="BUY",
+        units=Decimal("1"),
+    )
+
+    account = await ledger_service.load_paper_account(
+        db_session, user_id=user.id, connection=paper, country="argentina"
+    )
+    assert account.position_for("VIST").quantity == Decimal("1")
+    assert fake_iol.trade_posts == []
+    assert list(fake_iol.authenticated_paths).count("/api/v2/estadocuenta") == asked_before
+
+
 async def test_a_paper_run_does_not_ask_the_broker_for_an_account_status(
     db_session, make_user, fake_iol
 ) -> None:
